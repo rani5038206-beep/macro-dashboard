@@ -10,120 +10,127 @@ st.title("📊 Macro Allocation Dashboard")
 start = "2018-01-01"
 
 # =========================
-# DATA LOADER
+# SAFE DATA LOADER (NO CRASH)
 # =========================
 @st.cache_data(ttl=3600)
 def load_data():
     tickers = {
-        "^NSEI": "NIFTY",
-        "^NSEBANK": "BANK",
-        "^CNXIT": "IT",
-        "^GSPC": "SPX",
-        "^VIX": "VIX",
-        "^TNX": "US10Y",
-        "DX-Y.NYB": "DXY"
+        "SPX": "^GSPC",
+        "DXY": "DX-Y.NYB",
+        "VIX": "^VIX",
+        "US10Y": "^TNX",
+        "NIFTY": "^NSEI",
+        "BANK": "^NSEBANK",
+        "IT": "^CNXIT"
     }
 
     data = {}
+    failed = []
 
-    for t, name in tickers.items():
-        try:
-            df = yf.download(t, start=start, progress=False, threads=False)
-            if df is None or df.empty:
-                continue
-
-            col = "Adj Close" if "Adj Close" in df.columns else "Close"
-            data[name] = df[col]
-
-            time.sleep(1)
-
-        except:
-            continue
+    for k, v in tickers.items():
+        for i in range(3):  # retry logic
+            try:
+                df = yf.download(v, start=start, progress=False)
+                if not df.empty:
+                    data[k] = df["Adj Close"]
+                    break
+                time.sleep(1)
+            except:
+                time.sleep(1)
+        else:
+            failed.append(k)
 
     if len(data) == 0:
-        return pd.DataFrame()
+        return None, failed
 
     df = pd.concat(data.values(), axis=1)
-    df.columns = list(data.keys())
+    df.columns = data.keys()
+    df = df.ffill().dropna()
 
-    return df.dropna(how="all")
+    return df, failed
 
 
-df = load_data()
+df, failed = load_data()
 
-if df.empty:
-    st.warning("⚠️ Data unavailable. Refresh after 1 minute.")
+if df is None:
+    st.error("❌ Data not loading. Try again later.")
     st.stop()
 
+if failed:
+    st.warning(f"⚠ Missing data: {failed}")
+
+# =========================
+# SIGNALS
+# =========================
 weekly = df.resample("W").last()
 
-# =========================
-# STRONG SIGNAL LOGIC
-# =========================
-signals = {}
-
-def trend(series, short=3, long=15):
-    ma_s = series.rolling(short).mean()
-    ma_l = series.rolling(long).mean()
-    return np.where(ma_s > ma_l, 1, -1)
+signal_df = pd.DataFrame(index=weekly.index)
 
 if "SPX" in weekly:
-    signals["SPX"] = trend(weekly["SPX"])
+    signal_df["SPX"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
 
 if "DXY" in weekly:
-    signals["DXY"] = -trend(weekly["DXY"])
+    signal_df["DXY"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
 
 if "VIX" in weekly:
-    signals["VIX"] = -trend(weekly["VIX"], 2, 10)
+    signal_df["VIX"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(20).mean(), -1, 1)
 
 if "US10Y" in weekly:
-    signals["US10Y"] = -trend(weekly["US10Y"])
-
-signal_df = pd.DataFrame(signals).fillna(0)
+    signal_df["US10Y"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
 
 # =========================
-# MOMENTUM (STRONGER)
+# MOMENTUM (INDIA)
 # =========================
-momentum = {}
+mom_df = pd.DataFrame(index=weekly.index)
 
 if "NIFTY" in weekly:
-    momentum["NIFTY"] = np.sign(weekly["NIFTY"].pct_change(2))
+    mom_df["NIFTY"] = np.where(weekly["NIFTY"].pct_change(12) > 0, 1, -1)
 
 if "BANK" in weekly:
-    momentum["BANK"] = np.sign(weekly["BANK"].pct_change(2))
+    mom_df["BANK"] = np.where(weekly["BANK"].pct_change(12) > 0, 1, -1)
 
-mom_df = pd.DataFrame(momentum).fillna(0)
-
-# =========================
-# DECISIVE SCORE ENGINE
-# =========================
-macro_score = signal_df.sum(axis=1)
-momentum_score = mom_df.sum(axis=1)
-
-# 🔥 amplify macro impact
-final_score = (macro_score * 3) + momentum_score
-
-weekly["SCORE"] = final_score
-
-latest = weekly.iloc[-1]
-
-if pd.isna(latest["SCORE"]):
-    latest["SCORE"] = 0
+if "IT" in weekly:
+    mom_df["IT"] = np.where(weekly["IT"].pct_change(12) > 0, 1, -1)
 
 # =========================
-# REGIME (FORCED DECISION)
+# WEIGHTED SCORING MODEL
 # =========================
-if latest["SCORE"] <= -3:
-    regime = "🔴 RISK OFF"
-    allocation = {"Nifty":10,"Bank":0,"IT":60,"Cash":30}
+weights = {
+    "SPX": 2,
+    "DXY": 3,
+    "VIX": 3,
+    "US10Y": 2
+}
 
-elif latest["SCORE"] < 3:
-    regime = "🟡 NEUTRAL"
-    allocation = {"Nifty":30,"Bank":30,"IT":30,"Cash":10}
+macro_score = 0
+for col in signal_df.columns:
+    macro_score += signal_df[col] * weights.get(col, 1)
 
+momentum_score = mom_df.sum(axis=1) * 2
+
+final_score = macro_score + momentum_score
+
+latest_score = final_score.iloc[-1]
+
+# =========================
+# REGIME
+# =========================
+if latest_score > 2:
+    regime = "RISK ON"
+elif latest_score < -2:
+    regime = "RISK OFF"
 else:
-    regime = "🟢 RISK ON"
-    allocation = {"Nifty":60,"Bank":30,"IT":10,"Cash":0}
+    regime = "NEUTRAL"
+
+# =========================
+# ALLOCATION
+# =========================
+if regime == "RISK ON":
+    allocation = {"Nifty": 50, "Bank": 30, "IT": 20, "Cash": 0}
+elif regime == "RISK OFF":
+    allocation = {"Nifty": 20, "Bank": 10, "IT": 20, "Cash": 50}
+else:
+    allocation = {"Nifty": 30, "Bank": 30, "IT": 30, "Cash": 10}
 
 # =========================
 # UI
@@ -132,21 +139,28 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("Current Regime")
-    st.write(regime)
-    st.write(f"Score: {latest['SCORE']}")
+    color = "🟢" if regime == "RISK ON" else "🔴" if regime == "RISK OFF" else "🟡"
+    st.write(f"{color} {regime}")
+    st.write(f"Score: {round(float(latest_score),2)}")
 
 with col2:
     st.subheader("Allocation")
-    st.write(allocation)
+    st.json(allocation)
 
 # =========================
-# SIGNAL TABLE
+# SIGNAL DISPLAY
 # =========================
 st.subheader("Macro Signals (Latest)")
-st.write(signal_df.tail(1))
+st.dataframe(signal_df.tail(1))
 
 # =========================
 # CHART
 # =========================
 st.subheader("Market Trend")
-st.line_chart(weekly)
+
+chart_cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
+
+if chart_cols:
+    st.line_chart(df[chart_cols])
+else:
+    st.warning("No chart data available")
