@@ -18,7 +18,7 @@ st.sidebar.header("Macro Input")
 india_10y = st.sidebar.number_input("India 10Y Yield (%)", value=7.1)
 
 # ===============================
-# FETCH MACRO DATA
+# SAFE MACRO DATA FETCH
 # ===============================
 @st.cache_data(ttl=3600)
 def get_macro_data():
@@ -31,59 +31,82 @@ def get_macro_data():
     }
 
     data = {}
+
     for k, t in tickers.items():
         try:
             df = yf.download(t, period="3mo", progress=False)
-            data[k] = df["Close"]
+
+            if df.empty or "Close" not in df:
+                data[k] = pd.Series(dtype=float)
+            else:
+                data[k] = df["Close"].dropna()
+
         except:
-            data[k] = pd.Series()
+            data[k] = pd.Series(dtype=float)
 
     return data
 
 # ===============================
-# SIGNAL LOGIC (FIXED ERROR)
+# ROBUST SIGNAL FUNCTION
 # ===============================
 def get_signal(series):
-    if len(series) < 20:
+    try:
+        if series is None or len(series) < 20:
+            return 0
+
+        series = series.dropna()
+
+        if len(series) < 20:
+            return 0
+
+        last = float(series.iloc[-1])
+        prev = float(series.iloc[-20])
+
+        return 1 if last > prev else -1
+
+    except:
         return 0
-    return 1 if float(series.iloc[-1]) > float(series.iloc[-20]) else -1
 
 # ===============================
 # INDIA IMPACT LOGIC
 # ===============================
 def india_impact(factor, signal):
-    if factor == "SPX":
-        return "Positive" if signal == 1 else "Negative"
-    if factor == "DXY":
-        return "Negative" if signal == 1 else "Positive"
-    if factor == "INDIAVIX":
-        return "Negative" if signal == 1 else "Positive"
-    if factor == "USDINR":
-        return "Negative" if signal == 1 else "Positive"
-    if factor == "CRUDE":
-        return "Negative" if signal == 1 else "Positive"
-    if factor == "INDIA10Y":
-        return "Negative" if signal == 1 else "Positive"
+    mapping = {
+        "SPX": (1, -1),
+        "DXY": (-1, 1),
+        "INDIAVIX": (-1, 1),
+        "USDINR": (-1, 1),
+        "CRUDE": (-1, 1),
+        "INDIA10Y": (-1, 1)
+    }
+
+    pos, neg = mapping.get(factor, (0, 0))
+    return "Positive" if signal == pos else "Negative"
 
 # ===============================
-# WHY THIS MATTERS
+# EXPLANATION ENGINE
 # ===============================
 def explain(factor, signal):
-    explanations = {
+    logic = {
         "SPX": ("Global markets strong → supports India" if signal==1 else "Global weakness → risk off"),
         "DXY": ("Weak dollar → FII inflow" if signal==-1 else "Strong dollar → FII outflow"),
-        "INDIAVIX": ("Low volatility → stable market" if signal==-1 else "High fear → risk"),
-        "USDINR": ("Rupee strong → macro stable" if signal==-1 else "Rupee weak → pressure"),
+        "INDIAVIX": ("Low volatility → stable market" if signal==-1 else "High volatility → fear"),
+        "USDINR": ("Rupee strong → stability" if signal==-1 else "Rupee weak → pressure"),
         "CRUDE": ("Low crude → good for India" if signal==-1 else "High crude → inflation risk"),
         "INDIA10Y": ("Lower yields → growth support" if signal==-1 else "Higher yields → cost pressure")
     }
-    return explanations.get(factor, "")
+    return logic.get(factor, "")
 
 # ===============================
 # MACRO ENGINE
 # ===============================
 data = get_macro_data()
-signals = {k: get_signal(v) for k,v in data.items()}
+
+signals = {}
+for k, v in data.items():
+    signals[k] = get_signal(v)
+
+# manual India 10Y
 signals["INDIA10Y"] = 1 if india_10y > 7 else -1
 
 weights = {
@@ -95,8 +118,9 @@ weights = {
     "INDIA10Y":0.15
 }
 
-score = sum(signals[k]*weights[k] for k in weights)
+score = sum(signals.get(k,0)*weights[k] for k in weights)
 
+# REGIME
 if score > 0.5:
     regime = "RISK ON"
     equity_alloc = 70
@@ -108,7 +132,7 @@ else:
     equity_alloc = 50
 
 # ===============================
-# UI HEADER
+# HEADER
 # ===============================
 st.title("Macro → Micro Portfolio Engine")
 
@@ -121,19 +145,19 @@ col3.metric("Equity Allocation", f"{equity_alloc}%")
 # MACRO TABLE
 # ===============================
 rows = []
-for k in signals:
+for k in weights:
     rows.append({
         "Factor":k,
-        "Signal":signals[k],
-        "Impact":india_impact(k, signals[k]),
-        "Why this matters":explain(k, signals[k])
+        "Signal":signals.get(k,0),
+        "Impact":india_impact(k, signals.get(k,0)),
+        "Why this matters":explain(k, signals.get(k,0))
     })
 
 st.subheader("Macro Interpretation")
 st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 # ===============================
-# STOCK SELECTION ENGINE
+# STOCK ENGINE
 # ===============================
 @st.cache_data(ttl=3600)
 def get_stocks():
@@ -149,10 +173,14 @@ def get_stocks():
     for s in universe:
         try:
             df = yf.download(s, period="6mo", progress=False)
-            if len(df) < 60:
+
+            if df.empty or len(df) < 60:
                 continue
 
-            close = df["Close"]
+            close = df["Close"].dropna()
+
+            if len(close) < 60:
+                continue
 
             ret = (close.iloc[-1]/close.iloc[-60]-1)*100
             trend = 1 if close.iloc[-1] > close.iloc[-20] else -1
@@ -170,6 +198,10 @@ def get_stocks():
             continue
 
     df = pd.DataFrame(result)
+
+    if df.empty:
+        return df
+
     df = df[df["Return%"] > 5]
     df = df.sort_values("Score", ascending=False)
 
@@ -178,21 +210,27 @@ def get_stocks():
 top_stocks = get_stocks()
 
 # ===============================
-# ALLOCATION
+# DISPLAY STOCKS
 # ===============================
 st.subheader("Top 10 Stock Selection")
 
-st.dataframe(top_stocks, use_container_width=True)
+if top_stocks.empty:
+    st.warning("No stocks passed filter today")
+else:
+    st.dataframe(top_stocks, use_container_width=True)
 
+# ===============================
+# POSITION SIZING
+# ===============================
 equity_amt = portfolio_value * equity_alloc / 100
 
-if len(top_stocks) > 0:
+if not top_stocks.empty:
     per_stock = equity_amt / len(top_stocks)
 
     alloc_df = top_stocks.copy()
     alloc_df["Allocation ₹"] = round(per_stock,0)
 
-    st.subheader("Position Sizing")
+    st.subheader("Position Sizing (₹ per stock)")
     st.dataframe(alloc_df, use_container_width=True)
 
 # ===============================
@@ -210,6 +248,6 @@ else:
     st.error(f"Reduce equity by {abs(diff)}%")
 
 # ===============================
-# LAST UPDATE
+# FOOTER
 # ===============================
 st.caption(f"Last updated: {datetime.now().strftime('%d-%b %H:%M')}")
