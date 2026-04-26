@@ -7,7 +7,7 @@ from datetime import datetime
 st.set_page_config(page_title="Macro → Micro Engine", layout="wide")
 
 # ===============================
-# USER INPUT
+# INPUT
 # ===============================
 st.sidebar.header("Client Input")
 
@@ -18,7 +18,7 @@ st.sidebar.header("Macro Input")
 india_10y = st.sidebar.number_input("India 10Y Yield (%)", value=7.1)
 
 # ===============================
-# SAFE DOWNLOAD
+# SAFE DATA
 # ===============================
 def safe_download(ticker):
     try:
@@ -30,15 +30,13 @@ def safe_download(ticker):
         return pd.Series(dtype=float)
 
 # ===============================
-# SIGNAL
+# SIGNAL (INDIA IMPACT LOGIC)
 # ===============================
 def get_signal(series):
     try:
         if len(series) < 20:
             return 0
-        last = float(series.iloc[-1])
-        prev = float(series.iloc[-20])
-        return 1 if last > prev else -1
+        return 1 if float(series.iloc[-1]) > float(series.iloc[-20]) else -1
     except:
         return 0
 
@@ -54,8 +52,19 @@ data = {
 }
 
 signals = {k: get_signal(v) for k, v in data.items()}
-signals["INDIA10Y"] = 1 if india_10y > 7 else -1
 
+# INDIA IMPACT FIX
+signals["DXY"] *= -1          # strong dollar = bad
+signals["INDIAVIX"] *= -1     # high vix = bad
+signals["USDINR"] *= -1       # rising USDINR = bad
+signals["CRUDE"] *= -1        # rising crude = bad
+
+# India Bond Yield
+signals["INDIA10Y"] = -1 if india_10y > 7 else 1
+
+# ===============================
+# SCORE CALCULATION
+# ===============================
 weights = {
     "SPX":0.2,
     "DXY":0.2,
@@ -65,23 +74,23 @@ weights = {
     "INDIA10Y":0.15
 }
 
-score = sum(signals[k]*weights[k] for k in weights)
+score_raw = sum(signals[k]*weights[k] for k in weights)
+
+# Convert to %
+score_percent = round((score_raw + 1) * 50, 1)
 
 # ===============================
-# DECISION ENGINE
+# DECISION
 # ===============================
-if score > 0.5:
-    regime = "POSITIVE"
-    decision = "INVEST"
+if score_percent >= 70:
+    decision = "🟢 BUY INDIA"
     equity_alloc = 70
-elif score < -0.5:
-    regime = "NEGATIVE"
-    decision = "REDUCE"
-    equity_alloc = 30
-else:
-    regime = "NEUTRAL"
-    decision = "HOLD"
+elif score_percent >= 51:
+    decision = "🟡 HOLD"
     equity_alloc = 50
+else:
+    decision = "🔴 REDUCE / FEAR"
+    equity_alloc = 30
 
 # ===============================
 # HEADER
@@ -89,47 +98,45 @@ else:
 st.title("Macro → Micro Portfolio Engine")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Market Regime", regime)
-c2.metric("Model Score", round(score,2))
-c3.metric("Action", decision)
-
-st.subheader(f"Recommended Equity Allocation: {equity_alloc}%")
+c1.metric("India Score %", f"{score_percent}%")
+c2.metric("Decision", decision)
+c3.metric("Equity Allocation", f"{equity_alloc}%")
 
 # ===============================
 # MACRO TABLE
 # ===============================
-def explain(f, s):
+def explain(k, s):
     mapping = {
-        "SPX": ("Global support" if s==1 else "Global weakness"),
-        "DXY": ("FII inflow" if s==-1 else "FII outflow"),
-        "INDIAVIX": ("Stable market" if s==-1 else "Fear"),
-        "USDINR": ("Strong INR" if s==-1 else "Weak INR"),
-        "CRUDE": ("Low inflation" if s==-1 else "High inflation"),
-        "INDIA10Y": ("Low cost" if s==-1 else "High cost")
+        "SPX": "Global support" if s==1 else "Global weakness",
+        "DXY": "Weak dollar → FII inflow" if s==1 else "Strong dollar → FII outflow",
+        "INDIAVIX": "Low volatility → Stable" if s==1 else "High volatility → Fear",
+        "USDINR": "Strong INR → Positive" if s==1 else "Weak INR → Negative",
+        "CRUDE": "Low crude → Low inflation" if s==1 else "High crude → Inflation risk",
+        "INDIA10Y": "Low yield → Cheap capital" if s==1 else "High yield → Expensive capital"
     }
-    return mapping.get(f,"")
+    return mapping.get(k, "")
 
 rows = []
 for k in signals:
     rows.append({
         "Factor":k,
         "Signal":signals[k],
-        "Interpretation":explain(k, signals[k])
+        "Impact":"Positive" if signals[k]==1 else "Negative",
+        "Why it matters":explain(k, signals[k])
     })
 
-st.subheader("Macro Signals")
+st.subheader("Macro Interpretation")
 st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 # ===============================
-# STOCK ENGINE (SCREENER STYLE)
+# STOCK SELECTION (FIXED)
 # ===============================
 @st.cache_data(ttl=1800)
 def get_stocks():
     universe = [
         "RELIANCE.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","TCS.NS",
         "LT.NS","ITC.NS","HINDUNILVR.NS","SBIN.NS","AXISBANK.NS",
-        "BAJFINANCE.NS","KOTAKBANK.NS","ASIANPAINT.NS","MARUTI.NS",
-        "TITAN.NS","SUNPHARMA.NS"
+        "BAJFINANCE.NS","KOTAKBANK.NS"
     ]
 
     data = []
@@ -142,7 +149,7 @@ def get_stocks():
 
             close = df["Close"]
 
-            ret = (close.iloc[-1]/close.iloc[-60]-1)*100
+            ret = float((close.iloc[-1]/close.iloc[-60]-1)*100)
             trend = 1 if close.iloc[-1] > close.iloc[-20] else -1
 
             score = ret + trend*5
@@ -157,19 +164,28 @@ def get_stocks():
         except:
             continue
 
+    if len(data) == 0:
+        return pd.DataFrame()
+
     df = pd.DataFrame(data)
+
+    # FIX: avoid KeyError
+    if "Return %" not in df.columns:
+        return pd.DataFrame()
+
     df = df[df["Return %"] > 5]
+
     return df.sort_values("Score", ascending=False).head(10)
 
 stocks = get_stocks()
 
 # ===============================
-# STOCK DISPLAY
+# DISPLAY STOCKS
 # ===============================
 st.subheader("Top Stock Picks")
 
 if stocks.empty:
-    st.warning("No stocks match criteria")
+    st.warning("No stocks passed screener")
 else:
     st.dataframe(stocks, use_container_width=True)
 
@@ -182,24 +198,24 @@ if not stocks.empty:
     per_stock = equity_amount / len(stocks)
     stocks["Allocation ₹"] = round(per_stock,0)
 
-    st.subheader("Allocation per Stock")
+    st.subheader("Position Sizing (₹ per stock)")
     st.dataframe(stocks, use_container_width=True)
 
 # ===============================
 # REBALANCE
 # ===============================
-st.subheader("Rebalancing Decision")
+st.subheader("Rebalancing")
 
 diff = equity_alloc - current_equity
 
 if abs(diff) < 5:
-    st.success("HOLD - No change")
+    st.success("HOLD – No major change")
 elif diff > 0:
-    st.info(f"INVEST more: Increase equity by {diff}%")
+    st.info(f"Increase Equity by {diff}%")
 else:
-    st.error(f"REDUCE equity by {abs(diff)}%")
+    st.error(f"Reduce Equity by {abs(diff)}%")
 
 # ===============================
 # FOOTER
 # ===============================
-st.caption(f"Updated: {datetime.now().strftime('%d-%b %H:%M')}")
+st.caption(f"Last Updated: {datetime.now().strftime('%d-%b %H:%M')}")
