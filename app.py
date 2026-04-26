@@ -21,22 +21,47 @@ def load_data():
         "VIX": "^INDIAVIX",
         "US10Y": "^TNX"
     }
+
     data = {}
-    for k,v in tickers.items():
-        data[k] = yf.download(v, start=start)["Adj Close"]
-    return pd.DataFrame(data).dropna()
+
+    for k, v in tickers.items():
+        try:
+            df = yf.download(v, start=start)
+
+            if df.empty:
+                continue
+
+            if "Adj Close" in df.columns:
+                data[k] = df["Adj Close"]
+            elif "Close" in df.columns:
+                data[k] = df["Close"]
+        except:
+            continue
+
+    df = pd.DataFrame(data).dropna()
+
+    return df
 
 df = load_data()
+
+# SAFETY CHECK
+if df.empty:
+    st.error("Data not loading. Try again later.")
+    st.stop()
+
 weekly = df.resample("W").last()
 
+# Signals
 weekly["DXY_S"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
 weekly["SPX_S"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
 weekly["VIX_S"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
 weekly["USY_S"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
 
 weekly["SCORE"] = weekly[["DXY_S","SPX_S","VIX_S","USY_S"]].sum(axis=1)
+
 latest = weekly.iloc[-1]
 
+# Regime Logic
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -47,6 +72,7 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
+# UI
 col1, col2 = st.columns(2)
 
 with col1:
