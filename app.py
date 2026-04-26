@@ -18,64 +18,74 @@ signals = {
 model_score = sum(signals.values())
 
 # =========================
-# 2. REGIME LOGIC
+# 2. REGIME
 # =========================
 if model_score >= 2:
     regime = "RISK ON"
     model_equity = 70
-
 elif model_score <= -2:
     regime = "RISK OFF"
     model_equity = 30
-
 else:
     regime = "TRANSITION"
     model_equity = 50
 
 # =========================
-# 3. STOCK ENGINE
+# 3. 🔥 YOUR SCREENER STOCKS
 # =========================
-@st.cache_data(ttl=3600)
-def get_stock_details(regime):
+# 👉 PASTE ALL 61 STOCKS HERE (VERY IMPORTANT)
+SCREENER_STOCKS = [
+    "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS",
+    "LT.NS","SBIN.NS","AXISBANK.NS","BAJFINANCE.NS","SUNPHARMA.NS"
+    # 👉 ADD REST FROM SCREENER
+]
 
-    universe = [
-        "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS",
-        "ICICIBANK.NS","LT.NS","ITC.NS","HINDUNILVR.NS",
-        "SBIN.NS","AXISBANK.NS"
-    ]
+# =========================
+# 4. STOCK ENGINE
+# =========================
+@st.cache_data(ttl=300)
+def get_best_stocks():
 
     try:
-        data = yf.download(universe, period="3mo", progress=False)["Close"]
+        data = yf.download(SCREENER_STOCKS, period="3mo", progress=False)["Close"]
 
-        latest = data.iloc[-1]
-        returns = (data.iloc[-1] / data.iloc[0] - 1).sort_values(ascending=False)
+        returns_1m = (data.iloc[-1] / data.iloc[-20] - 1)
+        returns_3m = (data.iloc[-1] / data.iloc[0] - 1)
+        volatility = data.pct_change().std()
 
-        if regime == "RISK ON":
-            selected = returns.head(5)
+        df = pd.DataFrame({
+            "Stock": returns_1m.index,
+            "R1M": returns_1m.values,
+            "R3M": returns_3m.values,
+            "Vol": volatility.values
+        })
 
-        elif regime == "RISK OFF":
-            selected = returns.tail(5)
+        # 🔥 SMART RANKING
+        df["Score"] = (df["R1M"] * 0.5) + (df["R3M"] * 0.4) - (df["Vol"] * 0.1)
 
-        else:
-            selected = returns.iloc[2:7]
+        df = df.sort_values("Score", ascending=False).head(5)
 
-        result = []
-        for stock in selected.index:
-            result.append({
+        latest_prices = data.iloc[-1]
+
+        results = []
+        for _, row in df.iterrows():
+            stock = row["Stock"]
+
+            results.append({
                 "name": stock.replace(".NS",""),
-                "price": float(latest[stock]),
-                "return": float(returns[stock] * 100)
+                "price": float(latest_prices[stock]),
+                "score": float(row["Score"]),
+                "r1m": float(row["R1M"] * 100),
+                "r3m": float(row["R3M"] * 100)
             })
 
-        return result
+        return results
 
     except:
         return []
 
-stocks = get_stock_details(regime)
-
 # =========================
-# 4. UI HEADER
+# 5. UI HEADER
 # =========================
 st.title("Client Portfolio Dashboard")
 
@@ -85,7 +95,7 @@ col2.metric("Model Score", model_score)
 col3.metric("Recommended Equity %", model_equity)
 
 # =========================
-# 5. CLIENT INPUT
+# 6. CLIENT INPUT
 # =========================
 st.sidebar.header("Client Input")
 
@@ -93,7 +103,7 @@ client_equity = st.sidebar.slider("Equity %", 0, 100, 60)
 portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
 
 # =========================
-# 6. ACTION REQUIRED
+# 7. ACTION
 # =========================
 st.subheader("Action Required")
 
@@ -107,7 +117,7 @@ else:
     st.info("Portfolio aligned")
 
 # =========================
-# 7. PORTFOLIO IMPACT
+# 8. PORTFOLIO IMPACT
 # =========================
 st.subheader("Portfolio Impact")
 
@@ -118,43 +128,46 @@ st.write(f"Current Equity: ₹{current_equity:,.0f}")
 st.write(f"Recommended Equity: ₹{recommended_equity:,.0f}")
 
 # =========================
-# 8. POSITION SIZING ENGINE
+# 9. 🔥 STOCK PICKS + POSITION SIZING
 # =========================
-st.subheader("Top Stock Picks (With Allocation & Units)")
+st.subheader("🚀 Best Stocks (From Screener + Real-Time Ranking)")
+
+stocks = get_best_stocks()
 
 if stocks:
 
-    total_equity_amount = recommended_equity
-
-    # 🔥 Momentum-based allocation
-    total_return_weight = sum([abs(s["return"]) for s in stocks])
+    total_equity = recommended_equity
+    total_score = sum([abs(s["score"]) for s in stocks])
 
     for s in stocks:
 
-        weight = abs(s["return"]) / total_return_weight if total_return_weight != 0 else 1/len(stocks)
-        allocation = total_equity_amount * weight
+        weight = abs(s["score"]) / total_score if total_score != 0 else 1/len(stocks)
+        allocation = total_equity * weight
 
         price = s["price"]
-
-        if price > 0:
-            units = int(allocation / price)
-        else:
-            units = 0
-
-        invested_value = units * price
+        units = int(allocation / price) if price > 0 else 0
+        invested = units * price
 
         st.markdown(f"""
 ### {s['name']}
 
 • Price: ₹{price:.2f}  
-• 3M Return: {s['return']:.2f}%  
+• 1M Return: {s['r1m']:.2f}%  
+• 3M Return: {s['r3m']:.2f}%  
 
 👉 Allocation: ₹{allocation:,.0f}  
 👉 Units to Buy: {units}  
-👉 Invested Value: ₹{invested_value:,.0f}  
+👉 Invested Value: ₹{invested:,.0f}  
 
 ---
 """)
 
 else:
-    st.warning("Stock data unavailable")
+    st.warning("No stock data available")
+
+# =========================
+# 10. REFRESH BUTTON
+# =========================
+if st.button("🔄 Refresh Market Data"):
+    st.cache_data.clear()
+    st.success("Market data refreshed")
