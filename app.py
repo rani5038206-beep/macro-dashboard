@@ -26,30 +26,41 @@ def load_data():
 
     for k, v in tickers.items():
         try:
-            df = yf.download(v, start=start)
+            df = yf.download(v, start=start, progress=False)
 
-            if df.empty:
+            if df is None or df.empty:
                 continue
 
-            if "Adj Close" in df.columns:
-                data[k] = df["Adj Close"]
-            elif "Close" in df.columns:
-                data[k] = df["Close"]
+            col = "Adj Close" if "Adj Close" in df.columns else "Close"
+
+            series = df[col].rename(k)
+            data[k] = series
+
         except:
             continue
 
-    df = pd.DataFrame(data).dropna()
+    if len(data) < 5:
+        return pd.DataFrame()
 
-    return df
+    df = pd.concat(data.values(), axis=1)
+
+    return df.dropna()
 
 df = load_data()
 
-# SAFETY CHECK
 if df.empty:
-    st.error("Data not loading. Try again later.")
+    st.error("⚠️ Data not loading properly. Try refresh after few seconds.")
     st.stop()
 
 weekly = df.resample("W").last()
+
+# Required columns check
+required = ["DXY", "SPX", "VIX", "US10Y", "NIFTY", "BANK", "IT"]
+missing = [c for c in required if c not in weekly.columns]
+
+if missing:
+    st.error(f"⚠️ Missing data: {missing}")
+    st.stop()
 
 # Signals
 weekly["DXY_S"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
@@ -61,7 +72,7 @@ weekly["SCORE"] = weekly[["DXY_S","SPX_S","VIX_S","USY_S"]].sum(axis=1)
 
 latest = weekly.iloc[-1]
 
-# Regime Logic
+# Regime
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
