@@ -2,57 +2,53 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import json
 from datetime import datetime
 
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 # =========================
-# MANUAL REFRESH CONTROL (VERY IMPORTANT)
+# CLIENT STORAGE FILE
 # =========================
-if "last_fetch" not in st.session_state:
-    st.session_state.last_fetch = None
-if "data" not in st.session_state:
-    st.session_state.data = None
+FILE = "clients.json"
 
-def fetch_data():
+def load_clients():
     try:
-        data = yf.download(
+        with open(FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_clients(data):
+    with open(FILE, "w") as f:
+        json.dump(data, f)
+
+clients = load_clients()
+
+# =========================
+# DATA FETCH (CONTROLLED)
+# =========================
+@st.cache_data(ttl=600)
+def get_data():
+    try:
+        df = yf.download(
             ["^GSPC", "DX-Y.NYB", "^VIX", "^TNX"],
             period="6mo",
-            interval="1d",
-            progress=False,
-            auto_adjust=True,
-            threads=False
-        )["Close"]
+            progress=False
+        )["Close"].dropna()
 
-        if data.empty:
-            raise Exception("Empty data")
-
-        data.columns = ["SPX", "DXY", "VIX", "US10Y"]
-        return data.dropna()
-
+        df.columns = ["SPX", "DXY", "VIX", "US10Y"]
+        return df
     except:
-        # fallback (NO FAILURE EVER)
-        dates = pd.date_range(end=datetime.today(), periods=120)
+        dates = pd.date_range(end=datetime.today(), periods=100)
         return pd.DataFrame({
-            "SPX": np.linspace(3500, 4500, 120) + np.random.normal(0, 50, 120),
-            "DXY": np.linspace(95, 105, 120) + np.random.normal(0, 1, 120),
-            "VIX": np.linspace(20, 15, 120) + np.random.normal(0, 2, 120),
-            "US10Y": np.linspace(2.5, 4.0, 120) + np.random.normal(0, 0.2, 120),
+            "SPX": np.random.rand(100)*1000+4000,
+            "DXY": np.random.rand(100)*10+95,
+            "VIX": np.random.rand(100)*5+15,
+            "US10Y": np.random.rand(100)+3
         }, index=dates)
 
-# =========================
-# CONTROLLED FETCH (NO AUTO SPAM)
-# =========================
-if st.session_state.data is None:
-    st.session_state.data = fetch_data()
-    st.session_state.last_fetch = datetime.now()
-
-if st.sidebar.button("🔄 Refresh Market Data"):
-    st.session_state.data = fetch_data()
-    st.session_state.last_fetch = datetime.now()
-
-df = st.session_state.data
+df = get_data()
 
 # =========================
 # SIGNAL ENGINE
@@ -67,49 +63,64 @@ signals = {
     "US10Y": -1 if latest["US10Y"] > prev["US10Y"] else 1,
 }
 
-score = int(sum(signals.values()))
+score = sum(signals.values())
 
-# =========================
-# REGIME LOGIC
-# =========================
 if score >= 2:
     regime = "RISK ON"
     alloc = {"Equity": 70, "Cash": 30}
     advice = "Increase equity exposure"
-    color = "green"
 elif score <= -2:
     regime = "RISK OFF"
     alloc = {"Equity": 30, "Cash": 70}
     advice = "Reduce equity exposure"
-    color = "red"
 else:
     regime = "TRANSITION"
     alloc = {"Equity": 50, "Cash": 50}
     advice = "Balanced approach"
-    color = "orange"
 
 # =========================
-# SIDEBAR (CLIENT INPUT)
+# SIDEBAR CLIENT MANAGEMENT
 # =========================
 st.sidebar.header("Client Management")
 
-client_name = st.sidebar.text_input("Client Name", "Client A")
-equity_pct = st.sidebar.slider("Equity %", 0, 100, 60)
-portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
+client_names = list(clients.keys())
+selected_client = st.sidebar.selectbox("Select Client", ["New Client"] + client_names)
 
-cash_pct = 100 - equity_pct
+if selected_client == "New Client":
+    name = st.sidebar.text_input("Client Name")
+    equity = st.sidebar.slider("Equity %", 0, 100, 60)
+    value = st.sidebar.number_input("Portfolio Value", value=1000000)
 
-st.sidebar.markdown(f"🕒 Last Data Update: {st.session_state.last_fetch.strftime('%H:%M:%S')}")
+    if st.sidebar.button("Save Client"):
+        clients[name] = {"equity": equity, "value": value}
+        save_clients(clients)
+        st.sidebar.success("Saved!")
+else:
+    data = clients[selected_client]
+    name = selected_client
+    equity = st.sidebar.slider("Equity %", 0, 100, data["equity"])
+    value = st.sidebar.number_input("Portfolio Value", value=data["value"])
+
+    if st.sidebar.button("Update"):
+        clients[name] = {"equity": equity, "value": value}
+        save_clients(clients)
+
+    if st.sidebar.button("Delete"):
+        del clients[name]
+        save_clients(clients)
+        st.sidebar.warning("Deleted")
+
+cash = 100 - equity
 
 # =========================
-# HEADER
+# MAIN DASHBOARD
 # =========================
-st.title(f"{client_name} - Portfolio Dashboard")
+st.title(f"{name} - Portfolio Dashboard")
 
 c1, c2, c3 = st.columns(3)
-c1.metric("Market Regime", regime)
-c2.metric("Model Score", score)
-c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
+c1.metric("Regime", regime)
+c2.metric("Score", score)
+c3.metric("Updated", datetime.today().strftime("%d %b %Y"))
 
 # =========================
 # ADVISORY
@@ -124,19 +135,19 @@ else:
     st.warning(advice)
 
 # =========================
-# PORTFOLIO COMPARISON
+# COMPARISON
 # =========================
 st.subheader("Portfolio Comparison")
 
-comparison = pd.DataFrame({
-    "Client": [equity_pct, cash_pct],
+df_compare = pd.DataFrame({
+    "Client": [equity, cash],
     "Model": [alloc["Equity"], alloc["Cash"]]
 }, index=["Equity", "Cash"])
 
-st.bar_chart(comparison)
+st.bar_chart(df_compare)
 
 # =========================
-# MARKET TREND
+# TREND
 # =========================
 st.subheader("Market Trend")
 st.line_chart(df)
@@ -144,12 +155,7 @@ st.line_chart(df)
 # =========================
 # SIGNAL TABLE
 # =========================
-st.subheader("Macro Signals")
+st.subheader("Signals")
+st.table(pd.DataFrame(signals, index=["Signal"]).T)
 
-signal_df = pd.DataFrame(signals, index=["Signal"]).T
-st.table(signal_df)
-
-# =========================
-# FOOTER
-# =========================
 st.caption("For informational purposes only.")
