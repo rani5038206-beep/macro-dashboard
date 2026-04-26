@@ -3,289 +3,231 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-st.set_page_config(page_title="Macro → Micro Portfolio Engine", layout="wide")
+st.set_page_config(page_title="Macro → Micro Engine", layout="wide")
 
-# =========================
-# 1. MACRO DATA (INDIA FOCUSED)
-# =========================
-@st.cache_data(ttl=600)
-def get_macro():
-    tickers = [
-        "^GSPC",       # SPX
-        "DX-Y.NYB",    # DXY
-        "^INDIAVIX",   # INDIA VIX ✅
-        "INR=X",       # USDINR
-        "CL=F"         # CRUDE
-    ]
+# ===============================
+# 📊 FETCH MACRO DATA
+# ===============================
+@st.cache_data(ttl=3600)
+def get_macro_data():
+    data = {}
 
-    df = yf.download(tickers, period="6mo", progress=False)["Close"].dropna()
-    df.columns = ["SPX","DXY","INDIAVIX","USDINR","CRUDE"]
+    def safe_download(ticker):
+        try:
+            df = yf.download(ticker, period="3mo", progress=False)
+            return df["Close"].dropna()
+        except:
+            return pd.Series()
 
-    return df
+    data["SPX"] = safe_download("^GSPC")
+    data["DXY"] = safe_download("DX-Y.NYB")
+    data["INDIAVIX"] = safe_download("^INDIAVIX")
+    data["USDINR"] = safe_download("INR=X")
+    data["CRUDE"] = safe_download("CL=F")
+    data["INDIA10Y"] = safe_download("^TNX")  # proxy
 
-dfm = get_macro()
+    return data
 
-# =========================
-# 2. SIGNAL FUNCTION
-# =========================
-def get_signal(series, invert=False):
-    ma = series.rolling(20).mean()
-    sig = 1 if series.iloc[-1] > ma.iloc[-1] else -1
-    return -sig if invert else sig
+# ===============================
+# 📈 SIGNAL LOGIC
+# ===============================
+def get_signal(series):
+    if len(series) < 20:
+        return 0
+    return 1 if series.iloc[-1] > series.iloc[-20] else -1
 
-signals = {
-    "SPX": get_signal(dfm["SPX"]),                # ↑ good
-    "DXY": get_signal(dfm["DXY"], True),          # ↑ bad
-    "INDIAVIX": get_signal(dfm["INDIAVIX"], True),# ↑ bad
-    "USDINR": get_signal(dfm["USDINR"], True),    # ↑ bad
-    "CRUDE": get_signal(dfm["CRUDE"], True)       # ↑ bad
-}
+# ===============================
+# 🇮🇳 INDIA IMPACT LOGIC
+# ===============================
+def india_impact(factor, signal):
+    if factor == "SPX":
+        return "Positive" if signal == 1 else "Negative"
 
-# =========================
-# 3. INDIA 10Y (MANUAL INPUT)
-# =========================
-st.sidebar.header("Macro Input")
+    elif factor == "DXY":
+        return "Negative" if signal == 1 else "Positive"
 
-india_10y = st.sidebar.number_input("India 10Y Yield (%)", value=7.1)
+    elif factor == "INDIAVIX":
+        return "Negative" if signal == 1 else "Positive"
 
-if india_10y > 7.2:
-    signals["INDIA10Y"] = -1
-else:
-    signals["INDIA10Y"] = 1
+    elif factor == "INDIA10Y":
+        return "Negative" if signal == 1 else "Positive"
 
-# =========================
-# 4. WEIGHTS (INDIA FOCUSED)
-# =========================
+    elif factor == "USDINR":
+        return "Negative" if signal == 1 else "Positive"
+
+    elif factor == "CRUDE":
+        return "Negative" if signal == 1 else "Positive"
+
+    return "Neutral"
+
+# ===============================
+# 🧠 WHY THIS MATTERS (CLIENT TEXT)
+# ===============================
+def why_text(factor, signal):
+    if factor == "SPX":
+        return "Global markets are strong → risk appetite improves → supports Indian equities" if signal == 1 else "Global weakness → risk-off → pressure on Indian markets"
+
+    if factor == "DXY":
+        return "Dollar strengthening → FIIs may pull money out of India" if signal == 1 else "Weak dollar → FII inflows likely → positive for equities"
+
+    if factor == "INDIAVIX":
+        return "Low volatility → stable market → supports equity investments" if signal == -1 else "High volatility → fear → risk reduction"
+
+    if factor == "USDINR":
+        return "Rupee weakening → imported inflation → negative for equities" if signal == 1 else "Rupee stable/strong → confidence in economy"
+
+    if factor == "CRUDE":
+        return "Rising crude → inflation + fiscal pressure → negative for India" if signal == 1 else "Falling crude → margin + consumption boost"
+
+    if factor == "INDIA10Y":
+        return "Bond yields rising → cost of capital up → equities less attractive" if signal == 1 else "Lower yields → equity valuations supported"
+
+    return ""
+
+# ===============================
+# 🏭 SECTOR IMPACT ENGINE
+# ===============================
+def sector_impact(signals):
+    sector = {
+        "IT": 0,
+        "BANKS": 0,
+        "FMCG": 0,
+        "AUTO": 0,
+        "INFRA": 0,
+        "PHARMA": 0
+    }
+
+    # DXY impact (IT)
+    sector["IT"] += -signals["DXY"]
+
+    # Interest rate impact
+    sector["BANKS"] += -signals["INDIA10Y"]
+    sector["AUTO"] += -signals["INDIA10Y"]
+
+    # Crude impact
+    sector["AUTO"] += -signals["CRUDE"]
+    sector["FMCG"] += -signals["CRUDE"]
+
+    # Volatility
+    for s in sector:
+        sector[s] += -signals["INDIAVIX"]
+
+    # Global growth
+    for s in sector:
+        sector[s] += signals["SPX"]
+
+    return sector
+
+# ===============================
+# 📊 MACRO CALCULATION
+# ===============================
+data = get_macro_data()
+
+signals = {k: get_signal(v) for k, v in data.items()}
+
 weights = {
-    "SPX": 0.15,
-    "DXY": 0.15,
-    "INDIAVIX": 0.20,
-    "INDIA10Y": 0.20,
+    "SPX": 0.2,
+    "DXY": 0.2,
+    "INDIAVIX": 0.15,
     "USDINR": 0.15,
-    "CRUDE": 0.15
+    "CRUDE": 0.15,
+    "INDIA10Y": 0.15
 }
 
-model_score = sum(signals[k]*weights[k] for k in signals)
+score = sum(signals[k] * weights[k] for k in signals)
 
-# =========================
-# 5. REGIME
-# =========================
-if model_score > 0.4:
+# ===============================
+# 📊 REGIME
+# ===============================
+if score > 0.5:
     regime = "RISK ON"
-    eq_pct = 75
-elif model_score < -0.4:
+    equity_alloc = 70
+elif score < -0.5:
     regime = "RISK OFF"
-    eq_pct = 30
+    equity_alloc = 30
 else:
     regime = "TRANSITION"
-    eq_pct = 55
+    equity_alloc = 50
 
-# =========================
-# UI HEADER
-# =========================
+# ===============================
+# 🎯 UI
+# ===============================
 st.title("📊 Macro → Micro Portfolio Engine")
 
-col1,col2,col3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
 col1.metric("Regime", regime)
-col2.metric("Model Score", round(model_score,2))
-col3.metric("Equity %", f"{eq_pct}%")
+col2.metric("Model Score", round(score, 2))
+col3.metric("Recommended Equity %", f"{equity_alloc}%")
 
-# =========================
-# 6. MACRO INTERPRETATION
-# =========================
-st.subheader("📊 Macro Interpretation")
-
-explain = {
-    "SPX":"Global equity trend",
-    "DXY":"Dollar strength (FII impact)",
-    "INDIAVIX":"India market volatility",
-    "INDIA10Y":"India bond yield",
-    "USDINR":"Currency pressure",
-    "CRUDE":"Inflation pressure"
-}
-
-impact_map = {
-    "SPX": True,
-    "DXY": False,
-    "INDIAVIX": False,
-    "INDIA10Y": False,
-    "USDINR": False,
-    "CRUDE": False
-}
+# ===============================
+# 📊 MACRO TABLE
+# ===============================
+st.subheader("Macro Interpretation")
 
 rows = []
 for k in signals:
-    good_when_up = impact_map[k]
-
-    if signals[k] == 1:
-        impact = "Positive" if good_when_up else "Negative"
-    else:
-        impact = "Negative" if good_when_up else "Positive"
-
     rows.append({
-        "Factor":k,
-        "Meaning":explain[k],
-        "Signal":signals[k],
-        "Impact":impact
+        "Factor": k,
+        "Signal": signals[k],
+        "Impact (India)": india_impact(k, signals[k]),
+        "Why this matters": why_text(k, signals[k])
     })
 
-st.table(pd.DataFrame(rows))
+st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
-# =========================
-# 7. SCORE BREAKDOWN
-# =========================
-st.subheader("🧠 Model Score Breakdown")
+# ===============================
+# 🏭 SECTOR VIEW
+# ===============================
+st.subheader("Sector Impact")
 
-score_df = pd.DataFrame({
-    "Factor":signals.keys(),
-    "Signal":signals.values(),
-    "Weight":[weights[k] for k in signals]
-})
+sector_scores = sector_impact(signals)
+sector_df = pd.DataFrame({
+    "Sector": list(sector_scores.keys()),
+    "Score": list(sector_scores.values())
+}).sort_values("Score", ascending=False)
 
-score_df["Contribution"] = score_df["Signal"]*score_df["Weight"]
+st.dataframe(sector_df, use_container_width=True)
 
-st.dataframe(score_df)
-st.write(f"### Final Score: {model_score:.2f}")
-
-# =========================
-# 8. CLIENT INPUT
-# =========================
+# ===============================
+# 📊 CLIENT INPUT
+# ===============================
 st.sidebar.header("Client Input")
 
-portfolio = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
-current_eq = st.sidebar.slider("Current Equity %",0,100,60)
+portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
+current_equity = st.sidebar.slider("Current Equity %", 0, 100, 60)
 
-# =========================
-# 9. ACTION
-# =========================
-st.subheader("⚠️ Action Required")
+# ===============================
+# ⚠️ ACTION
+# ===============================
+st.subheader("Action Required")
 
-diff = eq_pct - current_eq
-
-if diff > 0:
-    st.success(f"Increase Equity by {diff}%")
-elif diff < 0:
-    st.error(f"Reduce Equity by {abs(diff)}%")
+if current_equity > equity_alloc:
+    st.error(f"Reduce equity by {current_equity - equity_alloc}%")
+elif current_equity < equity_alloc:
+    st.success(f"Increase equity by {equity_alloc - current_equity}%")
 else:
     st.info("Portfolio aligned")
 
-# =========================
-# 10. PORTFOLIO IMPACT
-# =========================
-st.subheader("💰 Portfolio Impact")
+# ===============================
+# 💰 PORTFOLIO IMPACT
+# ===============================
+st.subheader("Portfolio Impact")
 
-curr_eq_val = portfolio * current_eq/100
-rec_eq_val = portfolio * eq_pct/100
+current_equity_amt = portfolio_value * current_equity / 100
+recommended_equity_amt = portfolio_value * equity_alloc / 100
 
-col1,col2 = st.columns(2)
-col1.metric("Current Equity", f"₹{curr_eq_val:,.0f}")
-col2.metric("Recommended Equity", f"₹{rec_eq_val:,.0f}")
+col1, col2 = st.columns(2)
+col1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
+col2.metric("Recommended Equity", f"₹{int(recommended_equity_amt):,}")
 
-# =========================
-# 11. SCREENER STOCKS
-# =========================
-SCREENER = [
-    "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS",
-    "LT.NS","SBIN.NS","AXISBANK.NS","ITC.NS","HINDUNILVR.NS"
-]
+# ===============================
+# 📈 STOCK PICKS (SIMPLE)
+# ===============================
+st.subheader("Top Stock Picks")
 
-@st.cache_data(ttl=300)
-def rank_stocks(tickers):
-    data = yf.download(tickers, period="4mo", progress=False)["Close"].dropna()
-    latest = data.iloc[-1]
+stocks = ["RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "TCS.NS"]
 
-    r1m = (data.iloc[-1]/data.iloc[-20]-1)
-    r3m = (data.iloc[-1]/data.iloc[0]-1)
-    vol = data.pct_change().std()
+allocation_per_stock = recommended_equity_amt / len(stocks)
 
-    df = pd.DataFrame({
-        "Stock": r1m.index,
-        "R1M": r1m.values,
-        "R3M": r3m.values,
-        "Vol": vol.values,
-        "Price": latest.values
-    })
-
-    df["Score"] = df["R1M"]*0.5 + df["R3M"]*0.4 - df["Vol"]*0.1
-    df = df[df["R3M"] > 0]
-    df = df.sort_values("Score", ascending=False).head(10)
-
-    return df.reset_index(drop=True)
-
-ranked = rank_stocks(SCREENER)
-
-# =========================
-# 12. POSITION SIZING
-# =========================
-def get_weights(n, regime):
-    if regime == "RISK ON":
-        base = [0.15]*3 + [0.10]*3 + [0.05]*(n-6)
-    elif regime == "TRANSITION":
-        base = [0.12]*3 + [0.08]*3 + [0.05]*(n-6)
-    else:
-        base = [0.10]*3 + [0.05]*3 + [0.03]*(n-6)
-
-    base = base[:n]
-    w = np.array(base)
-    return w/w.sum()
-
-def build_portfolio(df):
-    df = df.copy()
-    weights = get_weights(len(df), regime)
-    df["Weight"] = weights
-    df["Alloc"] = df["Weight"] * portfolio * eq_pct/100
-    df["Units"] = (df["Alloc"]/df["Price"]).astype(int)
-    return df
-
-# =========================
-# 13. STOCK LOGIC
-# =========================
-st.subheader("📈 Stock Selection Logic")
-
-st.info("""
-✔ Strong earnings growth  
-✔ Improving margins  
-✔ Positive price momentum  
-✔ Lower volatility  
-""")
-
-# =========================
-# 14. TOP STOCKS
-# =========================
-st.subheader("🏆 Top Stocks")
-
-st.dataframe(ranked)
-
-# =========================
-# 15. FINAL PORTFOLIO
-# =========================
-st.subheader("💼 Final Allocation")
-
-portfolio_df = build_portfolio(ranked)
-
-st.dataframe(
-    portfolio_df.style.format({
-        "Price":"₹{:.2f}",
-        "Alloc":"₹{:,.0f}",
-        "Weight":"{:.2%}"
-    })
-)
-
-# =========================
-# 16. REBALANCE LOGIC
-# =========================
-st.subheader("🔁 Rebalancing Rule")
-
-st.info("""
-✔ Monthly review  
-✔ Remove weak stocks  
-✔ Add strong stocks  
-✔ Adjust weights based on rank  
-✔ Follow macro regime  
-""")
-
-# =========================
-# 17. TREND CHART
-# =========================
-st.subheader("📉 Market Trend")
-st.line_chart(dfm)
+for s in stocks:
+    st.write(f"{s} → ₹{int(allocation_per_stock):,}")
