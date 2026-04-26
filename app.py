@@ -9,16 +9,18 @@ st.set_page_config(page_title="Client Dashboard", layout="wide")
 DATA_FILE = "clients.csv"
 
 # ---------------------------
-# INIT CLIENT DATABASE
+# INIT DATABASE
 # ---------------------------
 if not os.path.exists(DATA_FILE):
-    df_init = pd.DataFrame(columns=["Name", "Equity", "Value"])
-    df_init.to_csv(DATA_FILE, index=False)
+    pd.DataFrame(columns=["Name", "Equity", "Value"]).to_csv(DATA_FILE, index=False)
 
 clients_df = pd.read_csv(DATA_FILE)
 
+def save_clients(df):
+    df.to_csv(DATA_FILE, index=False)
+
 # ---------------------------
-# LOAD MARKET DATA
+# MARKET DATA
 # ---------------------------
 @st.cache_data(ttl=3600)
 def load_data():
@@ -30,12 +32,11 @@ def load_data():
     }
 
     data = {}
-
-    for name, ticker in tickers.items():
+    for k, v in tickers.items():
         try:
-            df = yf.download(ticker, period="1y", progress=False)
-            if not df.empty:
-                data[name] = df["Close"]
+            d = yf.download(v, period="1y", progress=False)
+            if not d.empty:
+                data[k] = d["Close"]
         except:
             pass
 
@@ -46,11 +47,10 @@ def load_data():
     df.columns = data.keys()
     return df.dropna()
 
-
 df = load_data()
 
 if df is None:
-    st.error("❌ Data not loading")
+    st.error("❌ Market data unavailable")
     st.stop()
 
 # ---------------------------
@@ -73,57 +73,79 @@ score = (
 )
 
 # ---------------------------
-# REGIME
+# REGIME LOGIC
 # ---------------------------
 if score >= 2:
     regime = "RISK ON"
     color = "🟢"
-    allocation = {"Equity": 80, "Cash": 20}
+    model_alloc = {"Equity": 80, "Cash": 20}
     message = "Increase equity exposure"
 elif score <= -2:
     regime = "RISK OFF"
     color = "🔴"
-    allocation = {"Equity": 40, "Cash": 60}
+    model_alloc = {"Equity": 40, "Cash": 60}
     message = "Reduce equity exposure"
 else:
     regime = "TRANSITION"
     color = "🟡"
-    allocation = {"Equity": 60, "Cash": 40}
+    model_alloc = {"Equity": 60, "Cash": 40}
     message = "Maintain balanced allocation"
 
 # ---------------------------
-# SIDEBAR - CLIENT MGMT
+# SIDEBAR (FIXED UX)
 # ---------------------------
 st.sidebar.header("👤 Client Management")
 
-client_names = clients_df["Name"].tolist()
+client_list = clients_df["Name"].tolist()
+selected = st.sidebar.selectbox("Select Client", ["➕ New Client"] + client_list)
 
-selected_client = st.sidebar.selectbox(
-    "Select Client",
-    ["New Client"] + client_names
-)
+# ---------------------------
+# NEW CLIENT FLOW
+# ---------------------------
+if selected == "➕ New Client":
+    st.title("➕ Create New Client")
 
-if selected_client == "New Client":
-    name = st.sidebar.text_input("Client Name")
-    equity = st.sidebar.slider("Equity %", 0, 100, 60)
-    value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
+    name = st.text_input("Client Name")
+    equity = st.slider("Equity %", 0, 100, 60)
+    value = st.number_input("Portfolio Value (₹)", value=1000000)
 
-    if st.sidebar.button("Save Client"):
-        new_row = pd.DataFrame([[name, equity, value]],
+    if st.button("Save Client"):
+        if name.strip() == "":
+            st.error("⚠️ Enter client name")
+        else:
+            new = pd.DataFrame([[name, equity, value]],
                                columns=["Name", "Equity", "Value"])
-        clients_df = pd.concat([clients_df, new_row])
-        clients_df.to_csv(DATA_FILE, index=False)
-        st.sidebar.success("Client Saved")
-else:
-    row = clients_df[clients_df["Name"] == selected_client].iloc[0]
-    name = row["Name"]
-    equity = int(row["Equity"])
-    value = int(row["Value"])
+            clients_df = pd.concat([clients_df, new], ignore_index=True)
+            save_clients(clients_df)
+            st.success("✅ Client Saved")
+
+    st.stop()   # 🔴 IMPORTANT (stops dashboard from showing)
+
+# ---------------------------
+# EXISTING CLIENT FLOW
+# ---------------------------
+row = clients_df[clients_df["Name"] == selected].iloc[0]
+
+name = row["Name"]
+equity = st.sidebar.slider("Equity %", 0, 100, int(row["Equity"]))
+value = st.sidebar.number_input("Portfolio Value (₹)", value=int(row["Value"]))
+
+col1, col2 = st.sidebar.columns(2)
+
+if col1.button("Update"):
+    clients_df.loc[clients_df["Name"] == name, ["Equity", "Value"]] = [equity, value]
+    save_clients(clients_df)
+    st.sidebar.success("Updated")
+
+if col2.button("Delete"):
+    clients_df = clients_df[clients_df["Name"] != name]
+    save_clients(clients_df)
+    st.sidebar.warning("Deleted")
 
 cash = 100 - equity
 
 # ---------------------------
-# HEADER
+# DASHBOARD
 # ---------------------------
 st.title(f"📊 {name} - Portfolio Dashboard")
 
@@ -145,12 +167,11 @@ else:
     st.warning(message)
 
 # ---------------------------
-# COMPARISON
+# PORTFOLIO COMPARISON
 # ---------------------------
 st.subheader("⚖️ Portfolio Comparison")
 
 client_alloc = {"Equity": equity, "Cash": cash}
-model_alloc = allocation
 
 comparison = pd.DataFrame({
     "Client": client_alloc,
@@ -160,7 +181,7 @@ comparison = pd.DataFrame({
 st.bar_chart(comparison.T)
 
 # ---------------------------
-# ACTION
+# ACTION ENGINE
 # ---------------------------
 st.subheader("🚨 Action")
 
@@ -179,7 +200,7 @@ else:
 # ---------------------------
 st.subheader("🧠 Macro Signals")
 
-signals = pd.DataFrame({
+st.table(pd.DataFrame({
     "Indicator": ["SPX", "DXY", "VIX", "US10Y"],
     "Signal": [
         latest["SPX_S"],
@@ -187,9 +208,7 @@ signals = pd.DataFrame({
         latest["VIX_S"],
         latest["US10Y_S"]
     ]
-})
-
-st.table(signals)
+}))
 
 # ---------------------------
 # TREND
@@ -201,4 +220,4 @@ st.line_chart(df)
 # ---------------------------
 # FOOTER
 # ---------------------------
-st.caption("For informational purposes only.")
+st.caption("For informational purposes only")
