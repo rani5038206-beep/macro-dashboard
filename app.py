@@ -5,13 +5,16 @@ import numpy as np
 
 st.set_page_config(layout="wide")
 
+# =========================
+# HEADER
+# =========================
 st.title("📊 Caring Click - Macro Allocation Dashboard")
 st.caption("Model-driven asset allocation | For client communication")
 
 START = "2018-01-01"
 
 # =========================
-# DATA LOAD (SAFE)
+# DATA LOAD
 # =========================
 @st.cache_data(ttl=3600)
 def load_data():
@@ -48,7 +51,11 @@ def load_data():
 
     df = pd.concat(data.values(), axis=1)
     df.columns = data.keys()
+
     df = df.ffill().dropna()
+
+    # 🔥 CRITICAL FIX → force datetime index
+    df.index = pd.to_datetime(df.index)
 
     return df
 
@@ -80,16 +87,10 @@ sig = pd.DataFrame(index=weekly.index)
 mom = pd.DataFrame(index=weekly.index)
 
 for col in ["SPX", "DXY", "VIX", "US10Y"]:
-    if col in weekly:
-        sig[col] = signal(weekly[col], invert=(col != "SPX"))
-    else:
-        sig[col] = 0
+    sig[col] = signal(weekly[col]) if col in weekly else 0
 
 for col in ["NIFTY", "BANK", "IT"]:
-    if col in weekly:
-        mom[col] = momentum(weekly[col])
-    else:
-        mom[col] = 0
+    mom[col] = momentum(weekly[col]) if col in weekly else 0
 
 # =========================
 # SCORE
@@ -127,47 +128,51 @@ else:
     msg = "Capital protection mode."
 
 # =========================
-# TOP METRICS (SAFE)
+# METRICS (FINAL FIX)
 # =========================
-c1, c2, c3 = st.columns(3)
+col1, col2, col3 = st.columns(3)
 
-with c1:
+with col1:
     st.metric("Market Regime", f"{color} {regime}")
 
-with c2:
+with col2:
     st.metric("Model Score", f"{latest_score:.1f}")
 
-with c3:
-    last_date = pd.to_datetime(df.index[-1])
-    st.metric("Last Updated", last_date.strftime("%d %b %Y"))
+with col3:
+    # 🔥 FINAL SAFE FIX (NO TYPE ERROR EVER)
+    last_date = str(df.index[-1].date())
+    st.metric("Last Updated", last_date)
 
 st.info(f"📌 Advisory View: {msg}")
 
 # =========================
-# ALLOCATION
+# ALLOCATION CHART
 # =========================
 st.subheader("📊 Recommended Allocation")
-adf = pd.DataFrame(list(alloc.items()), columns=["Asset", "Weight"])
-st.bar_chart(adf.set_index("Asset"))
+
+alloc_df = pd.DataFrame(list(alloc.items()), columns=["Asset", "Weight"])
+st.bar_chart(alloc_df.set_index("Asset"))
 
 # =========================
 # SIGNAL TABLE
 # =========================
 st.subheader("🧠 Macro Signals (Latest)")
+
 latest = sig.tail(1).T
 latest.columns = ["Signal"]
 st.dataframe(latest)
 
 # =========================
-# CHART
+# TREND
 # =========================
 st.subheader("📈 Market Trend")
+
 cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
 
 if cols:
     st.line_chart(df[cols])
 else:
-    st.warning("No chart data")
+    st.warning("No chart data available")
 
 # =========================
 # FOOTER
