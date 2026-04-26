@@ -7,7 +7,7 @@ import time
 st.set_page_config(page_title="Macro → Micro Engine", layout="wide")
 
 # ===============================
-# SAFE DATA FETCH
+# DATA FETCH (SAFE)
 # ===============================
 @st.cache_data(ttl=3600)
 def fetch_data():
@@ -30,8 +30,6 @@ def fetch_data():
                 data[k] = pd.Series()
             else:
                 close = df["Close"]
-
-                # Ensure 1D
                 if isinstance(close, pd.DataFrame):
                     close = close.iloc[:, 0]
 
@@ -42,119 +40,119 @@ def fetch_data():
 
     return data
 
+
 # ===============================
-# SIGNAL FUNCTION (FIXED)
+# SIGNAL (TREND)
 # ===============================
 def get_signal(series):
     try:
-        if series is None or len(series) < 20:
-            return 0
-
-        series = series.dropna()
-
         if len(series) < 20:
             return 0
 
+        series = series.dropna()
         last = float(series.iloc[-1])
         prev = float(series.iloc[-20])
 
         return 1 if last > prev else -1
-
     except:
         return 0
 
-# ===============================
-# INDIA IMPACT LOGIC
-# ===============================
-def india_impact(factor, signal):
-    if factor == "SPX":
-        return "Positive" if signal == 1 else "Negative"
-
-    elif factor == "DXY":
-        return "Negative" if signal == 1 else "Positive"
-
-    elif factor == "INDIAVIX":
-        return "Negative" if signal == 1 else "Positive"
-
-    elif factor == "USDINR":
-        return "Negative" if signal == 1 else "Positive"
-
-    elif factor == "CRUDE":
-        return "Negative" if signal == 1 else "Positive"
-
-    elif factor == "INDIA10Y":
-        return "Negative" if signal == 1 else "Positive"
-
-    return "Neutral"
 
 # ===============================
-# WHY TEXT (CLIENT LANGUAGE)
+# LEVEL CHECK (NEW)
 # ===============================
-def why_text(factor, signal):
-    if factor == "SPX":
-        return "Global markets strong → supports Indian equities" if signal == 1 else "Global weakness → risk-off sentiment"
-
-    if factor == "DXY":
-        return "Strong dollar → FII outflow risk" if signal == 1 else "Weak dollar → FII inflows likely"
+def level_signal(factor, value):
+    if factor == "CRUDE":
+        if value > 85:
+            return -1
+        elif value < 70:
+            return 1
 
     if factor == "INDIAVIX":
-        return "Low volatility → stable markets" if signal == -1 else "High volatility → fear in market"
-
-    if factor == "USDINR":
-        return "Weak rupee → inflation risk" if signal == 1 else "Strong rupee → macro stability"
-
-    if factor == "CRUDE":
-        return "High crude → inflation + margin pressure" if signal == 1 else "Low crude → positive for economy"
+        if value > 20:
+            return -1
+        elif value < 13:
+            return 1
 
     if factor == "INDIA10Y":
-        return "High yields → cost of capital up" if signal == 1 else "Lower yields → equity supportive"
+        if value > 7.5:
+            return -1
+        elif value < 6.8:
+            return 1
+
+    if factor == "USDINR":
+        if value > 84:
+            return -1
+        elif value < 82:
+            return 1
+
+    return 0
+
+
+# ===============================
+# WHY TEXT (CORRECTED)
+# ===============================
+def why_text(factor, trend, level):
+    if factor == "CRUDE":
+        return "Crude falling → inflation easing → positive" if trend == -1 else "Crude rising → inflation pressure"
+
+    if factor == "USDINR":
+        return "Rupee strengthening → stability" if trend == -1 else "Rupee weakening → inflation risk"
+
+    if factor == "DXY":
+        return "Weak dollar → FII inflow" if trend == -1 else "Strong dollar → FII outflow"
+
+    if factor == "INDIAVIX":
+        return "Low volatility → stable markets" if trend == -1 else "High volatility → fear"
+
+    if factor == "INDIA10Y":
+        return "Lower yields → equity support" if trend == -1 else "Higher yields → cost pressure"
+
+    if factor == "SPX":
+        return "Global markets strong → supports India" if trend == 1 else "Global weakness → risk-off"
 
     return ""
 
+
 # ===============================
-# SECTOR IMPACT ENGINE
+# IMPACT (FINAL)
 # ===============================
-def sector_impact(signals):
-    sector = {
-        "IT": 0,
-        "BANKS": 0,
-        "FMCG": 0,
-        "AUTO": 0,
-        "INFRA": 0
-    }
+def final_signal(trend, level):
+    return trend + level
 
-    # DXY → IT
-    sector["IT"] += -signals["DXY"]
-
-    # Rates
-    sector["BANKS"] += -signals["INDIA10Y"]
-    sector["AUTO"] += -signals["INDIA10Y"]
-
-    # Crude
-    sector["AUTO"] += -signals["CRUDE"]
-    sector["FMCG"] += -signals["CRUDE"]
-
-    # Volatility
-    for s in sector:
-        sector[s] += -signals["INDIAVIX"]
-
-    # Global trend
-    for s in sector:
-        sector[s] += signals["SPX"]
-
-    return sector
 
 # ===============================
 # LOAD DATA
 # ===============================
 data = fetch_data()
 
-signals = {k: get_signal(v) for k, v in data.items()}
+trend_signals = {k: get_signal(v) for k, v in data.items()}
 
-# INDIA 10Y → MANUAL INPUT (IMPORTANT)
+# India 10Y manual
 india_10y = st.sidebar.number_input("India 10Y Yield (%)", value=7.1)
+trend_signals["INDIA10Y"] = 1 if india_10y > 7 else -1
 
-signals["INDIA10Y"] = 1 if india_10y > 7 else -1
+# ===============================
+# LEVEL SIGNALS
+# ===============================
+latest_values = {
+    k: float(v.iloc[-1]) if len(v) > 0 else 0
+    for k, v in data.items()
+}
+latest_values["INDIA10Y"] = india_10y
+
+level_signals = {
+    k: level_signal(k, latest_values[k])
+    for k in latest_values
+}
+
+# ===============================
+# FINAL SIGNAL
+# ===============================
+signals = {
+    k: final_signal(trend_signals[k], level_signals[k])
+    for k in trend_signals
+}
 
 # ===============================
 # MODEL SCORE
@@ -202,23 +200,32 @@ rows = []
 for k in signals:
     rows.append({
         "Factor": k,
-        "Signal": signals[k],
-        "Impact": india_impact(k, signals[k]),
-        "Why this matters": why_text(k, signals[k])
+        "Trend": trend_signals[k],
+        "Level": level_signals[k],
+        "Final Signal": signals[k],
+        "Why this matters": why_text(k, trend_signals[k], level_signals[k])
     })
 
 st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 # ===============================
-# SECTOR VIEW
+# SECTOR IMPACT
 # ===============================
+def sector_impact(signals):
+    sector = {
+        "IT": -signals["DXY"],
+        "BANKS": -signals["INDIA10Y"],
+        "FMCG": -signals["CRUDE"],
+        "AUTO": -signals["CRUDE"],
+        "INFRA": signals["SPX"]
+    }
+    return sector
+
 st.subheader("Sector Impact")
 
-sector_scores = sector_impact(signals)
-
 sector_df = pd.DataFrame({
-    "Sector": list(sector_scores.keys()),
-    "Score": list(sector_scores.values())
+    "Sector": sector_impact(signals).keys(),
+    "Score": sector_impact(signals).values()
 }).sort_values("Score", ascending=False)
 
 st.dataframe(sector_df, use_container_width=True)
