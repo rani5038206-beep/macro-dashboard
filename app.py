@@ -32,31 +32,37 @@ def load_data():
     for t, name in tickers.items():
         try:
             sub = raw[t]
+
             if sub is None or sub.empty:
                 continue
 
             col = "Adj Close" if "Adj Close" in sub.columns else "Close"
             data[name] = sub[col]
+
         except:
             continue
 
-    if len(data) < 3:  # minimum requirement
+    if len(data) == 0:
         return pd.DataFrame()
 
-    return pd.concat(data.values(), axis=1).dropna()
+    df = pd.concat(data.values(), axis=1)
+    return df.dropna(how="all")
 
 
 df = load_data()
 
 if df.empty:
-    st.warning("⚠️ Data not available. Refresh after 1 minute.")
+    st.warning("⚠️ Data temporarily unavailable. Refresh after 1 minute.")
     st.stop()
 
 weekly = df.resample("W").last()
 
+# =========================
+# SIGNALS (SAFE VERSION)
+# =========================
+
 signals = {}
 
-# Only compute if data exists
 if "DXY" in weekly:
     signals["DXY"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
 
@@ -69,18 +75,28 @@ if "VIX" in weekly:
 if "US10Y" in weekly:
     signals["US10Y"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
 
-# Combine signals safely
 signal_df = pd.DataFrame(signals)
 
-if signal_df.empty:
-    st.warning("⚠️ Signals not available yet.")
-    st.stop()
+# =========================
+# SCORE LOGIC (ROBUST)
+# =========================
 
-weekly["SCORE"] = signal_df.sum(axis=1)
+if signal_df.empty:
+    st.warning("⚠️ Limited data. Using neutral score.")
+    weekly["SCORE"] = 0
+else:
+    weekly["SCORE"] = signal_df.sum(axis=1)
+
+if len(weekly) == 0:
+    st.warning("No data available.")
+    st.stop()
 
 latest = weekly.iloc[-1]
 
-# Regime logic
+# =========================
+# REGIME
+# =========================
+
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -91,7 +107,10 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
+# =========================
 # UI
+# =========================
+
 col1, col2 = st.columns(2)
 
 with col1:
@@ -103,9 +122,14 @@ with col2:
     st.subheader("Allocation")
     st.write(allocation)
 
-# Chart (only available columns)
+# =========================
+# CHART
+# =========================
+
 available_cols = [c for c in ["NIFTY","BANK","IT"] if c in weekly.columns]
 
 if available_cols:
     st.subheader("Market Trend")
     st.line_chart(weekly[available_cols])
+else:
+    st.warning("No market data available for chart.")
