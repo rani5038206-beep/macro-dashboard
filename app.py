@@ -26,7 +26,7 @@ def save_clients(data):
 clients = load_clients()
 
 # =====================
-# DATA
+# MARKET DATA
 # =====================
 @st.cache_data(ttl=600)
 def get_data():
@@ -68,15 +68,20 @@ score = int(sum(signals.values()))
 if score >= 2:
     regime = "RISK ON"
     model_equity = 70
-    message = "Increase equity exposure"
+    screener_link = "https://www.screener.in/screens/1929320/"
+    screener_name = "Aggressive Growth Stocks"
+
 elif score <= -2:
     regime = "RISK OFF"
     model_equity = 30
-    message = "Reduce equity exposure"
+    screener_link = "https://www.screener.in/screens/1929322/"
+    screener_name = "Defensive Stocks"
+
 else:
     regime = "TRANSITION"
     model_equity = 50
-    message = "Stay balanced"
+    screener_link = "https://www.screener.in/screens/1929318/"
+    screener_name = "Balanced Quality Stocks"
 
 model_cash = 100 - model_equity
 
@@ -98,9 +103,7 @@ if selected == "New Client":
     value = st.sidebar.number_input("Portfolio Value", value=1000000)
 
     if st.sidebar.button("Save Client"):
-        if name.strip() == "":
-            st.sidebar.error("Enter client name")
-        else:
+        if name.strip() != "":
             clients[name] = {"equity": equity, "value": value}
             save_clients(clients)
             st.sidebar.success("Saved")
@@ -126,10 +129,7 @@ cash = 100 - equity
 # =====================
 # HEADER
 # =====================
-if name.strip() == "":
-    st.title("Client Portfolio Dashboard")
-else:
-    st.title(f"{name} - Portfolio Dashboard")
+st.title(f"{name} - Portfolio Dashboard" if name else "Client Dashboard")
 
 # =====================
 # METRICS
@@ -140,67 +140,37 @@ c2.metric("Model Score", score)
 c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 
 # =====================
-# ACTION (IMPORTANT)
+# ACTION
 # =====================
 st.subheader("Action Required")
 
 difference = model_equity - equity
+amount_shift = abs(difference) * value / 100
 
 if difference > 0:
-    action = f"Increase Equity by {difference}%"
-    st.success(action)
+    st.success(f"Increase Equity by {difference}%")
+    st.write(f"Move ₹{int(amount_shift):,} from Cash to Equity")
+
 elif difference < 0:
-    action = f"Reduce Equity by {abs(difference)}%"
-    st.error(action)
+    st.error(f"Reduce Equity by {abs(difference)}%")
+    st.write(f"Move ₹{int(amount_shift):,} from Equity to Cash/Debt")
+
 else:
-    action = "No Change Required"
-    st.info(action)
+    st.info("No change required")
 
 # =====================
-# ₹ IMPACT (VERY IMPORTANT)
+# IMPACT
 # =====================
 st.subheader("Portfolio Impact")
 
 current_equity_amt = value * (equity / 100)
 model_equity_amt = value * (model_equity / 100)
 
-st.write(f"Current Equity: ₹{int(current_equity_amt):,}")
-st.write(f"Recommended Equity: ₹{int(model_equity_amt):,}")
+col1, col2 = st.columns(2)
+col1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
+col2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
 
 # =====================
 # ADVISORY
 # =====================
-st.subheader("Advisory")
-
-if regime == "RISK ON":
-    st.success("Markets are strong. Increasing equity is advised.")
-elif regime == "RISK OFF":
-    st.error("Risk is rising. Protect capital and reduce exposure.")
-else:
-    st.warning("Mixed signals. Maintain balanced allocation.")
-
-# =====================
-# COMPARISON
-# =====================
-st.subheader("Portfolio Comparison")
-
-df_compare = pd.DataFrame({
-    "Client": [equity, cash],
-    "Model": [model_equity, model_cash]
-}, index=["Equity", "Cash"])
-
-st.bar_chart(df_compare)
-
-# =====================
-# MARKET TREND
-# =====================
-st.subheader("Market Trend")
-st.line_chart(df)
-
-# =====================
-# SIGNALS
-# =====================
-st.subheader("Signals")
-st.table(pd.DataFrame(signals, index=["Signal"]).T)
-
-st.caption("For informational purposes only.")
+st.subheader
