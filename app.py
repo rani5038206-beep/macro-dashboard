@@ -8,7 +8,7 @@ from datetime import datetime
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 # =========================
-# CLIENT STORAGE FILE
+# STORAGE
 # =========================
 FILE = "clients.json"
 
@@ -26,7 +26,7 @@ def save_clients(data):
 clients = load_clients()
 
 # =========================
-# DATA FETCH (CONTROLLED)
+# DATA (SAFE)
 # =========================
 @st.cache_data(ttl=600)
 def get_data():
@@ -63,8 +63,11 @@ signals = {
     "US10Y": -1 if latest["US10Y"] > prev["US10Y"] else 1,
 }
 
-score = sum(signals.values())
+score = int(sum(signals.values()))
 
+# =========================
+# REGIME
+# =========================
 if score >= 2:
     regime = "RISK ON"
     alloc = {"Equity": 70, "Cash": 30}
@@ -79,12 +82,17 @@ else:
     advice = "Balanced approach"
 
 # =========================
-# SIDEBAR CLIENT MANAGEMENT
+# SIDEBAR
 # =========================
 st.sidebar.header("Client Management")
 
 client_names = list(clients.keys())
 selected_client = st.sidebar.selectbox("Select Client", ["New Client"] + client_names)
+
+# DEFAULT VALUES
+name = ""
+equity = 60
+value = 1000000
 
 if selected_client == "New Client":
     name = st.sidebar.text_input("Client Name")
@@ -92,9 +100,12 @@ if selected_client == "New Client":
     value = st.sidebar.number_input("Portfolio Value", value=1000000)
 
     if st.sidebar.button("Save Client"):
-        clients[name] = {"equity": equity, "value": value}
-        save_clients(clients)
-        st.sidebar.success("Saved!")
+        if name.strip() == "":
+            st.sidebar.error("Client name required")
+        else:
+            clients[name] = {"equity": equity, "value": value}
+            save_clients(clients)
+            st.sidebar.success("Saved successfully")
 else:
     data = clients[selected_client]
     name = selected_client
@@ -104,6 +115,7 @@ else:
     if st.sidebar.button("Update"):
         clients[name] = {"equity": equity, "value": value}
         save_clients(clients)
+        st.sidebar.success("Updated")
 
     if st.sidebar.button("Delete"):
         del clients[name]
@@ -113,10 +125,16 @@ else:
 cash = 100 - equity
 
 # =========================
-# MAIN DASHBOARD
+# TITLE FIX (IMPORTANT)
 # =========================
-st.title(f"{name} - Portfolio Dashboard")
+if name.strip() == "":
+    st.title("Client Portfolio Dashboard")
+else:
+    st.title(f"{name} - Portfolio Dashboard")
 
+# =========================
+# METRICS
+# =========================
 c1, c2, c3 = st.columns(3)
 c1.metric("Regime", regime)
 c2.metric("Score", score)
