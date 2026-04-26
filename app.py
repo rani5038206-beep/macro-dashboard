@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import time
 
 st.set_page_config(layout="wide")
 st.title("📊 Macro Allocation Dashboard")
@@ -10,7 +9,7 @@ st.title("📊 Macro Allocation Dashboard")
 start = "2018-01-01"
 
 # =========================
-# SAFE DATA LOADER (NO CRASH)
+# BULK DATA DOWNLOAD (FIXED)
 # =========================
 @st.cache_data(ttl=3600)
 def load_data():
@@ -24,30 +23,39 @@ def load_data():
         "IT": "^CNXIT"
     }
 
-    data = {}
-    failed = []
+    try:
+        raw = yf.download(
+            list(tickers.values()),
+            start=start,
+            group_by="ticker",
+            auto_adjust=True,
+            progress=False
+        )
 
-    for k, v in tickers.items():
-        for i in range(3):  # retry logic
+        data = {}
+        failed = []
+
+        for name, ticker in tickers.items():
             try:
-                df = yf.download(v, start=start, progress=False)
-                if not df.empty:
-                    data[k] = df["Adj Close"]
-                    break
-                time.sleep(1)
+                df = raw[ticker]
+                if "Close" in df:
+                    data[name] = df["Close"]
+                else:
+                    failed.append(name)
             except:
-                time.sleep(1)
-        else:
-            failed.append(k)
+                failed.append(name)
 
-    if len(data) == 0:
-        return None, failed
+        if len(data) == 0:
+            return None, failed
 
-    df = pd.concat(data.values(), axis=1)
-    df.columns = data.keys()
-    df = df.ffill().dropna()
+        df = pd.concat(data.values(), axis=1)
+        df.columns = data.keys()
+        df = df.ffill().dropna()
 
-    return df, failed
+        return df, failed
+
+    except:
+        return None, list(tickers.keys())
 
 
 df, failed = load_data()
@@ -60,10 +68,13 @@ if failed:
     st.warning(f"⚠ Missing data: {failed}")
 
 # =========================
-# SIGNALS
+# WEEKLY DATA
 # =========================
 weekly = df.resample("W").last()
 
+# =========================
+# MACRO SIGNALS
+# =========================
 signal_df = pd.DataFrame(index=weekly.index)
 
 if "SPX" in weekly:
@@ -93,7 +104,7 @@ if "IT" in weekly:
     mom_df["IT"] = np.where(weekly["IT"].pct_change(12) > 0, 1, -1)
 
 # =========================
-# WEIGHTED SCORING MODEL
+# WEIGHTED SCORING
 # =========================
 weights = {
     "SPX": 2,
@@ -102,7 +113,8 @@ weights = {
     "US10Y": 2
 }
 
-macro_score = 0
+macro_score = pd.Series(0, index=weekly.index)
+
 for col in signal_df.columns:
     macro_score += signal_df[col] * weights.get(col, 1)
 
