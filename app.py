@@ -10,7 +10,7 @@ st.set_page_config(page_title="Client Dashboard", layout="wide")
 DATA_FILE = "clients.csv"
 
 # ---------------------------
-# INIT DATABASE (WITH ID)
+# INIT DATABASE
 # ---------------------------
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["ID", "Name", "Equity", "Value"]).to_csv(DATA_FILE, index=False)
@@ -21,7 +21,7 @@ def save_clients(df):
     df.to_csv(DATA_FILE, index=False)
 
 # ---------------------------
-# CLEAN DUPLICATES (AUTO FIX)
+# REMOVE DUPLICATES (SAFE)
 # ---------------------------
 clients_df = clients_df.drop_duplicates(subset=["Name"], keep="last")
 save_clients(clients_df)
@@ -122,11 +122,9 @@ if selected_name == "➕ New Client":
             st.error("⚠️ Enter client name")
 
         else:
-            # CHECK EXISTING
             if name in clients_df["Name"].values:
                 clients_df.loc[clients_df["Name"] == name, ["Equity", "Value"]] = [equity, value]
                 st.success("✅ Client updated")
-
             else:
                 new_id = str(uuid.uuid4())[:8]
                 new = pd.DataFrame([[new_id, name, equity, value]],
@@ -135,7 +133,6 @@ if selected_name == "➕ New Client":
                 st.success("✅ Client added")
 
             save_clients(clients_df)
-
             st.session_state["client"] = name
             st.rerun()
 
