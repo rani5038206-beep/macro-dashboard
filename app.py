@@ -3,22 +3,13 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-# =====================
-# PAGE CONFIG
-# =====================
 st.set_page_config(layout="wide")
 
-# =====================
-# HEADER
-# =====================
 st.title("📊 Caring Click - Macro Allocation Dashboard")
 st.caption("Model-driven asset allocation | For client communication")
 
 START = "2018-01-01"
 
-# =====================
-# DATA LOAD
-# =====================
 @st.cache_data(ttl=3600)
 def load_data():
     tickers = {
@@ -64,17 +55,11 @@ def load_data():
 df = load_data()
 
 if df is None or df.empty:
-    st.error("⚠️ Data not available. Try again later.")
+    st.error("⚠️ Data not available. Try later.")
     st.stop()
 
-# =====================
-# WEEKLY DATA
-# =====================
 weekly = df.resample("W").last()
 
-# =====================
-# SIGNAL FUNCTIONS
-# =====================
 def signal(series):
     ma = series.rolling(20).mean()
     return np.where(series > ma, 1, -1)
@@ -86,9 +71,6 @@ def inverse_signal(series):
 def momentum(series):
     return np.where(series.pct_change(12) > 0, 1, -1)
 
-# =====================
-# SIGNALS
-# =====================
 sig = pd.DataFrame(index=weekly.index)
 
 if "SPX" in weekly:
@@ -106,15 +88,9 @@ for col in ["NIFTY", "BANK", "IT"]:
     if col in weekly:
         mom[col] = momentum(weekly[col])
 
-# =====================
-# SCORE
-# =====================
 score = (sig.sum(axis=1) * 2) + mom.sum(axis=1)
 latest_score = float(score.iloc[-1])
 
-# =====================
-# REGIME
-# =====================
 if latest_score >= 3:
     regime, color = "RISK ON", "🟢"
 elif latest_score <= -3:
@@ -122,9 +98,6 @@ elif latest_score <= -3:
 else:
     regime, color = "TRANSITION", "🟡"
 
-# =====================
-# ALLOCATION
-# =====================
 if latest_score >= 6:
     alloc = {"Nifty": 60, "Bank": 25, "IT": 15, "Cash": 0}
     msg = "Strong positive environment."
@@ -141,9 +114,6 @@ else:
     alloc = {"Nifty": 10, "Bank": 10, "IT": 20, "Cash": 60}
     msg = "Capital protection."
 
-# =====================
-# METRICS
-# =====================
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -153,36 +123,20 @@ with col2:
     st.metric("Model Score", f"{latest_score:.1f}")
 
 with col3:
-    last_date = df.index[-1].strftime("%Y-%m-%d")
-    st.metric("Last Updated", last_date)
+    st.metric("Last Updated", df.index[-1].strftime("%Y-%m-%d"))
 
 st.info(f"📌 Advisory View: {msg}")
 
-# =====================
-# ALLOCATION CHART
-# =====================
 st.subheader("📊 Recommended Allocation")
-
 alloc_df = pd.DataFrame(list(alloc.items()), columns=["Asset", "Weight"])
 st.bar_chart(alloc_df.set_index("Asset"))
 
-# =====================
-# SIGNAL TABLE
-# =====================
 st.subheader("🧠 Macro Signals (Latest)")
+latest = sig.tail(1).T
+latest.columns = ["Signal"]
+st.dataframe(latest)
 
-if not sig.empty:
-    latest = sig.tail(1).T
-    latest.columns = ["Signal"]
-    st.dataframe(latest)
-else:
-    st.warning("Signals not available")
-
-# =====================
-# MARKET TREND
-# =====================
 st.subheader("📈 Market Trend")
-
 cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
 
 if cols:
@@ -190,8 +144,5 @@ if cols:
 else:
     st.warning("No chart data available")
 
-# =====================
-# FOOTER
-# =====================
 st.markdown("---")
 st.caption("For informational purposes only.")
