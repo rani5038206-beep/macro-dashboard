@@ -29,7 +29,6 @@ def load_data():
     for t, name in tickers.items():
         try:
             df = yf.download(t, start=start, progress=False, threads=False)
-
             if df is None or df.empty:
                 continue
 
@@ -59,48 +58,52 @@ if df.empty:
 weekly = df.resample("W").last()
 
 # =========================
-# STRONG SIGNAL ENGINE
+# STRONG SIGNAL LOGIC
 # =========================
 signals = {}
 
-def trend_signal(series, short=4, long=20):
-    ma_short = series.rolling(short).mean()
-    ma_long = series.rolling(long).mean()
-    return np.where(ma_short > ma_long, 1, -1)
+def trend(series, short=3, long=15):
+    ma_s = series.rolling(short).mean()
+    ma_l = series.rolling(long).mean()
+    return np.where(ma_s > ma_l, 1, -1)
 
 if "SPX" in weekly:
-    signals["SPX"] = trend_signal(weekly["SPX"])
+    signals["SPX"] = trend(weekly["SPX"])
 
 if "DXY" in weekly:
-    signals["DXY"] = -trend_signal(weekly["DXY"])
+    signals["DXY"] = -trend(weekly["DXY"])
 
 if "VIX" in weekly:
-    signals["VIX"] = -trend_signal(weekly["VIX"], short=2, long=10)
+    signals["VIX"] = -trend(weekly["VIX"], 2, 10)
 
 if "US10Y" in weekly:
-    signals["US10Y"] = -trend_signal(weekly["US10Y"])
+    signals["US10Y"] = -trend(weekly["US10Y"])
 
 signal_df = pd.DataFrame(signals).fillna(0)
 
 # =========================
-# MOMENTUM BOOST (KEY FIX)
+# MOMENTUM (STRONGER)
 # =========================
 momentum = {}
 
 if "NIFTY" in weekly:
-    momentum["NIFTY"] = np.sign(weekly["NIFTY"].pct_change(4))
+    momentum["NIFTY"] = np.sign(weekly["NIFTY"].pct_change(2))
 
 if "BANK" in weekly:
-    momentum["BANK"] = np.sign(weekly["BANK"].pct_change(4))
+    momentum["BANK"] = np.sign(weekly["BANK"].pct_change(2))
 
 mom_df = pd.DataFrame(momentum).fillna(0)
 
 # =========================
-# FINAL SCORE (POWERFUL)
+# DECISIVE SCORE ENGINE
 # =========================
-score = signal_df.sum(axis=1) * 2 + mom_df.sum(axis=1)
+macro_score = signal_df.sum(axis=1)
+momentum_score = mom_df.sum(axis=1)
 
-weekly["SCORE"] = score
+# 🔥 amplify macro impact
+final_score = (macro_score * 3) + momentum_score
+
+weekly["SCORE"] = final_score
 
 latest = weekly.iloc[-1]
 
@@ -108,13 +111,13 @@ if pd.isna(latest["SCORE"]):
     latest["SCORE"] = 0
 
 # =========================
-# REGIME (MORE SENSITIVE)
+# REGIME (FORCED DECISION)
 # =========================
-if latest["SCORE"] <= -4:
+if latest["SCORE"] <= -3:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":10,"Bank":0,"IT":60,"Cash":30}
 
-elif latest["SCORE"] <= 1:
+elif latest["SCORE"] < 3:
     regime = "🟡 NEUTRAL"
     allocation = {"Nifty":30,"Bank":30,"IT":30,"Cash":10}
 
@@ -130,16 +133,16 @@ col1, col2 = st.columns(2)
 with col1:
     st.subheader("Current Regime")
     st.write(regime)
-    st.write(f"Score: {round(latest['SCORE'],2)}")
+    st.write(f"Score: {latest['SCORE']}")
 
 with col2:
     st.subheader("Allocation")
     st.write(allocation)
 
 # =========================
-# SIGNAL VIEW (IMPORTANT)
+# SIGNAL TABLE
 # =========================
-st.subheader("Macro Signals")
+st.subheader("Macro Signals (Latest)")
 st.write(signal_df.tail(1))
 
 # =========================
