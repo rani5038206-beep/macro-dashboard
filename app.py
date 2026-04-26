@@ -5,11 +5,17 @@ import numpy as np
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Caring Click - Macro Allocation Dashboard")
-st.caption("Model-driven asset allocation | For client communication")
+# ======================
+# HEADER
+# ======================
+st.title("📊 Caring Click - Client Macro Dashboard")
+st.caption("Client-specific asset allocation & advisory system")
 
 START = "2018-01-01"
 
+# ======================
+# DATA LOAD
+# ======================
 @st.cache_data(ttl=3600)
 def load_data():
     tickers = {
@@ -22,16 +28,13 @@ def load_data():
         "IT": "^CNXIT"
     }
 
-    try:
-        raw = yf.download(
-            list(tickers.values()),
-            start=START,
-            group_by="ticker",
-            auto_adjust=True,
-            progress=False
-        )
-    except:
-        return None
+    raw = yf.download(
+        list(tickers.values()),
+        start=START,
+        group_by="ticker",
+        auto_adjust=True,
+        progress=False
+    )
 
     data = {}
     for k, v in tickers.items():
@@ -39,9 +42,6 @@ def load_data():
             data[k] = raw[v]["Close"]
         except:
             continue
-
-    if not data:
-        return None
 
     df = pd.concat(data.values(), axis=1)
     df.columns = data.keys()
@@ -55,11 +55,17 @@ def load_data():
 df = load_data()
 
 if df is None or df.empty:
-    st.error("⚠️ Data not available. Try later.")
+    st.error("⚠️ Data not available")
     st.stop()
 
+# ======================
+# WEEKLY
+# ======================
 weekly = df.resample("W").last()
 
+# ======================
+# SIGNALS
+# ======================
 def signal(series):
     ma = series.rolling(20).mean()
     return np.where(series > ma, 1, -1)
@@ -91,6 +97,9 @@ for col in ["NIFTY", "BANK", "IT"]:
 score = (sig.sum(axis=1) * 2) + mom.sum(axis=1)
 latest_score = float(score.iloc[-1])
 
+# ======================
+# REGIME
+# ======================
 if latest_score >= 3:
     regime, color = "RISK ON", "🟢"
 elif latest_score <= -3:
@@ -98,21 +107,33 @@ elif latest_score <= -3:
 else:
     regime, color = "TRANSITION", "🟡"
 
+# ======================
+# MODEL ALLOCATION
+# ======================
 if latest_score >= 6:
-    alloc = {"Nifty": 60, "Bank": 25, "IT": 15, "Cash": 0}
-    msg = "Strong positive environment."
+    model_alloc = {"Nifty": 60, "Bank": 25, "IT": 15, "Cash": 0}
 elif latest_score >= 3:
-    alloc = {"Nifty": 50, "Bank": 30, "IT": 20, "Cash": 0}
-    msg = "Positive trend."
+    model_alloc = {"Nifty": 50, "Bank": 30, "IT": 20, "Cash": 0}
 elif latest_score >= 0:
-    alloc = {"Nifty": 30, "Bank": 30, "IT": 20, "Cash": 20}
-    msg = "Balanced approach."
+    model_alloc = {"Nifty": 30, "Bank": 30, "IT": 20, "Cash": 20}
 elif latest_score >= -3:
-    alloc = {"Nifty": 20, "Bank": 20, "IT": 20, "Cash": 40}
-    msg = "Reduce exposure."
+    model_alloc = {"Nifty": 20, "Bank": 20, "IT": 20, "Cash": 40}
 else:
-    alloc = {"Nifty": 10, "Bank": 10, "IT": 20, "Cash": 60}
-    msg = "Capital protection."
+    model_alloc = {"Nifty": 10, "Bank": 10, "IT": 20, "Cash": 60}
+
+# ======================
+# CLIENT INPUT
+# ======================
+st.sidebar.header("👤 Client Portfolio")
+
+client_equity = st.sidebar.slider("Equity %", 0, 100, 60)
+client_cash = st.sidebar.slider("Cash %", 0, 100, 20)
+client_other = 100 - (client_equity + client_cash)
+
+# ======================
+# CLIENT VS MODEL
+# ======================
+st.subheader("📌 Market Overview")
 
 col1, col2, col3 = st.columns(3)
 
@@ -125,24 +146,104 @@ with col2:
 with col3:
     st.metric("Last Updated", df.index[-1].strftime("%Y-%m-%d"))
 
-st.info(f"📌 Advisory View: {msg}")
+# ======================
+# COMPARISON
+# ======================
+st.subheader("⚖️ Portfolio Comparison")
 
+comparison = pd.DataFrame({
+    "Model": [
+        model_alloc["Nifty"] + model_alloc["Bank"] + model_alloc["IT"],
+        model_alloc["Cash"]
+    ],
+    "Client": [
+        client_equity,
+        client_cash
+    ]
+}, index=["Equity", "Cash"])
+
+st.bar_chart(comparison)
+
+# ======================
+# ACTION ENGINE (KEY)
+# ======================
+st.subheader("🚨 Action Required")
+
+model_equity = model_alloc["Nifty"] + model_alloc["Bank"] + model_alloc["IT"]
+
+diff = client_equity - model_equity
+
+if diff > 10:
+    action = "🔻 Reduce Equity Exposure"
+elif diff < -10:
+    action = "🔺 Increase Equity Exposure"
+else:
+    action = "✅ Maintain Current Allocation"
+
+st.success(action)
+
+# ======================
+# DETAILED ADVICE
+# ======================
+st.subheader("📢 Advisory")
+
+if regime == "RISK ON":
+    msg = "Aggressive positioning allowed. Focus on growth sectors."
+elif regime == "RISK OFF":
+    msg = "Protect capital. Increase cash and defensive allocation."
+else:
+    msg = "Mixed signals. Maintain balanced allocation."
+
+st.info(msg)
+
+# ======================
+# MODEL ALLOCATION
+# ======================
 st.subheader("📊 Recommended Allocation")
-alloc_df = pd.DataFrame(list(alloc.items()), columns=["Asset", "Weight"])
+
+alloc_df = pd.DataFrame(list(model_alloc.items()), columns=["Asset", "Weight"])
 st.bar_chart(alloc_df.set_index("Asset"))
 
-st.subheader("🧠 Macro Signals (Latest)")
+# ======================
+# SIGNALS
+# ======================
+st.subheader("🧠 Macro Signals")
+
 latest = sig.tail(1).T
 latest.columns = ["Signal"]
 st.dataframe(latest)
 
+# ======================
+# TREND
+# ======================
 st.subheader("📈 Market Trend")
+
 cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
+st.line_chart(df[cols])
 
-if cols:
-    st.line_chart(df[cols])
-else:
-    st.warning("No chart data available")
+# ======================
+# WHATSAPP REPORT
+# ======================
+st.subheader("📲 Client Report")
 
+report = f"""
+Market: {regime}
+Score: {latest_score}
+
+Model Allocation:
+Nifty {model_alloc['Nifty']}%
+Bank {model_alloc['Bank']}%
+IT {model_alloc['IT']}%
+Cash {model_alloc['Cash']}%
+
+Client Equity: {client_equity}%
+Recommended Action: {action}
+"""
+
+st.code(report)
+
+# ======================
+# FOOTER
+# ======================
 st.markdown("---")
-st.caption("For informational purposes only.")
+st.caption("For advisory use only")
