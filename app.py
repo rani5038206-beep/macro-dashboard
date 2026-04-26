@@ -1,237 +1,82 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import json
-from datetime import datetime
-
-st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
-
-FILE = "clients.json"
-
 # =====================
-# CLIENT STORAGE
+# ADVANCED STOCK PICKS
 # =====================
-def load_clients():
-    try:
-        with open(FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_clients(data):
-    with open(FILE, "w") as f:
-        json.dump(data, f)
-
-clients = load_clients()
-
-# =====================
-# MARKET DATA
-# =====================
-@st.cache_data(ttl=600)
-def get_data():
-    try:
-        df = yf.download(
-            ["^GSPC", "DX-Y.NYB", "^VIX", "^TNX"],
-            period="6mo",
-            progress=False
-        )["Close"].dropna()
-
-        df.columns = ["SPX", "DXY", "VIX", "US10Y"]
-        return df
-    except:
-        dates = pd.date_range(end=datetime.today(), periods=100)
-        return pd.DataFrame(np.random.rand(100,4), columns=["SPX","DXY","VIX","US10Y"], index=dates)
-
-df = get_data()
-
-latest = df.iloc[-1]
-prev = df.iloc[-2]
-
-signals = {
-    "SPX": 1 if latest["SPX"] > prev["SPX"] else -1,
-    "DXY": -1 if latest["DXY"] > prev["DXY"] else 1,
-    "VIX": -1 if latest["VIX"] > prev["VIX"] else 1,
-    "US10Y": -1 if latest["US10Y"] > prev["US10Y"] else 1,
-}
-
-score = int(sum(signals.values()))
-
-# =====================
-# REGIME
-# =====================
-if score >= 2:
-    regime = "RISK ON"
-    model_equity = 70
-elif score <= -2:
-    regime = "RISK OFF"
-    model_equity = 30
-else:
-    regime = "TRANSITION"
-    model_equity = 50
-
-model_cash = 100 - model_equity
-
-# =====================
-# DYNAMIC STOCK ENGINE
-# =====================
-def get_dynamic_stocks(regime):
+def get_stock_details(regime):
     
-    # Base universe (India large caps)
-    universe = [
-        "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
-        "ICICIBANK.NS", "LT.NS", "ITC.NS", "HINDUNILVR.NS",
-        "SBIN.NS", "AXISBANK.NS"
-    ]
-    
+    universe = {
+        "RELIANCE.NS": "Large cap growth",
+        "TCS.NS": "Stable IT leader",
+        "INFY.NS": "Tech momentum",
+        "HDFCBANK.NS": "Banking leader",
+        "ICICIBANK.NS": "High growth bank",
+        "LT.NS": "Infra growth",
+        "ITC.NS": "Defensive FMCG",
+        "HINDUNILVR.NS": "Stable FMCG",
+        "SBIN.NS": "PSU bank momentum",
+        "AXISBANK.NS": "Private bank growth"
+    }
+
     try:
-        data = yf.download(universe, period="3mo", progress=False)["Close"]
-        
+        data = yf.download(list(universe.keys()), period="3mo", progress=False)["Close"]
+        latest_prices = data.iloc[-1]
+
         returns = (data.iloc[-1] / data.iloc[0] - 1).sort_values(ascending=False)
-        
+
         if regime == "RISK ON":
-            picks = returns.head(5).index.tolist()
-            
+            selected = returns.head(5)
+
         elif regime == "RISK OFF":
-            picks = returns.tail(5).index.tolist()
-            
+            selected = returns.tail(5)
+
         else:
-            picks = returns.iloc[2:7].index.tolist()
-            
-        return [s.replace(".NS","") for s in picks]
-    
+            selected = returns.iloc[2:7]
+
+        results = []
+
+        for stock in selected.index:
+            name = stock.replace(".NS", "")
+            price = round(latest_prices[stock], 2)
+
+            if regime == "RISK ON":
+                reason = "Strong momentum"
+                risk = "Medium"
+
+            elif regime == "RISK OFF":
+                reason = "Defensive / stable"
+                risk = "Low"
+
+            else:
+                reason = "Balanced exposure"
+                risk = "Medium"
+
+            results.append({
+                "name": name,
+                "price": price,
+                "reason": reason,
+                "risk": risk
+            })
+
+        return results
+
     except:
-        return ["HDFC Bank", "Infosys", "ITC", "L&T", "ICICI Bank"]
+        return [
+            {"name": "HDFC Bank", "price": "-", "reason": "Stable leader", "risk": "Low"},
+            {"name": "Infosys", "price": "-", "reason": "Tech exposure", "risk": "Medium"},
+        ]
 
-stocks = get_dynamic_stocks(regime)
 
-# =====================
-# SIDEBAR
-# =====================
-st.sidebar.header("Client Management")
-
-client_list = list(clients.keys())
-selected = st.sidebar.selectbox("Select Client", ["New Client"] + client_list)
-
-name = ""
-equity = 60
-value = 1000000
-
-if selected == "New Client":
-    name = st.sidebar.text_input("Client Name")
-    equity = st.sidebar.slider("Equity %", 0, 100, 60)
-    value = st.sidebar.number_input("Portfolio Value", value=1000000)
-
-    if st.sidebar.button("Save Client"):
-        if name.strip():
-            clients[name] = {"equity": equity, "value": value}
-            save_clients(clients)
-            st.sidebar.success("Saved")
-
-else:
-    data = clients[selected]
-    name = selected
-    equity = st.sidebar.slider("Equity %", 0, 100, data["equity"])
-    value = st.sidebar.number_input("Portfolio Value", value=data["value"])
-
-    if st.sidebar.button("Update"):
-        clients[name] = {"equity": equity, "value": value}
-        save_clients(clients)
-        st.sidebar.success("Updated")
-
-    if st.sidebar.button("Delete"):
-        del clients[name]
-        save_clients(clients)
-        st.sidebar.warning("Deleted")
-
-cash = 100 - equity
+stocks = get_stock_details(regime)
 
 # =====================
-# HEADER
+# DISPLAY STOCKS
 # =====================
-st.title(f"{name} - Portfolio Dashboard" if name else "Client Dashboard")
+st.subheader("Top Stock Picks (Actionable)")
 
-# =====================
-# METRICS
-# =====================
-c1, c2, c3 = st.columns(3)
-c1.metric("Market Regime", regime)
-c2.metric("Model Score", score)
-c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
-
-# =====================
-# ACTION
-# =====================
-st.subheader("Action Required")
-
-difference = model_equity - equity
-amount_shift = abs(difference) * value / 100
-
-if difference > 0:
-    st.success(f"Increase Equity by {difference}%")
-    st.write(f"Move ₹{int(amount_shift):,} from Cash to Equity")
-
-elif difference < 0:
-    st.error(f"Reduce Equity by {abs(difference)}%")
-    st.write(f"Move ₹{int(amount_shift):,} from Equity to Cash/Debt")
-
-else:
-    st.info("No change required")
-
-# =====================
-# IMPACT
-# =====================
-st.subheader("Portfolio Impact")
-
-current_equity_amt = value * equity / 100
-model_equity_amt = value * model_equity / 100
-
-col1, col2 = st.columns(2)
-col1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
-col2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
-
-# =====================
-# ADVISORY
-# =====================
-st.subheader("Advisory")
-
-if regime == "RISK ON":
-    st.success("Markets strong → Increase equity exposure")
-elif regime == "RISK OFF":
-    st.error("Risk high → Protect capital")
-else:
-    st.warning("Mixed signals → Stay balanced")
-
-# =====================
-# STOCK PICKS (DYNAMIC)
-# =====================
-st.subheader("Top Stock Picks (Dynamic)")
-
-for stock in stocks:
-    st.write(f"• {stock}")
-
-# =====================
-# COMPARISON
-# =====================
-st.subheader("Portfolio Comparison")
-
-df_compare = pd.DataFrame({
-    "Client": [equity, cash],
-    "Model": [model_equity, model_cash]
-}, index=["Equity", "Cash"])
-
-st.bar_chart(df_compare)
-
-# =====================
-# MARKET TREND
-# =====================
-st.subheader("Market Trend")
-st.line_chart(df)
-
-# =====================
-# SIGNALS
-# =====================
-st.subheader("Signals")
-st.table(pd.DataFrame(signals, index=["Signal"]).T)
-
-st.caption("For informational purposes only.")
+for s in stocks:
+    st.markdown(f"""
+**{s['name']}**  
+Price: ₹{s['price']}  
+Reason: {s['reason']}  
+Risk: {s['risk']}  
+---
+""")
