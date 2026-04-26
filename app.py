@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from pandas_datareader import data as pdr
+import time
 
 st.set_page_config(layout="wide")
 st.title("📊 Macro Allocation Dashboard")
@@ -11,73 +11,53 @@ start = "2018-01-01"
 
 @st.cache_data(ttl=3600)
 def load_data():
-    data = {}
-
-    # ------------------------
-    # INDIA MARKET (Yahoo OK)
-    # ------------------------
     tickers = {
         "^NSEI": "NIFTY",
         "^NSEBANK": "BANK",
-        "^CNXIT": "IT"
+        "^CNXIT": "IT",
+        "^GSPC": "SPX",
+        "^VIX": "VIX",
+        "^TNX": "US10Y",
+        "DX-Y.NYB": "DXY"
     }
+
+    data = {}
 
     for t, name in tickers.items():
         try:
-            df = yf.download(t, start=start, progress=False)
+            df = yf.download(t, start=start, progress=False, threads=False)
+
+            if df is None or df.empty:
+                continue
+
             col = "Adj Close" if "Adj Close" in df.columns else "Close"
             data[name] = df[col]
+
+            time.sleep(1)  # 🔥 avoid rate limit
+
         except:
-            pass
-
-    # ------------------------
-    # US MARKETS (Yahoo)
-    # ------------------------
-    try:
-        spx = yf.download("^GSPC", start=start, progress=False)
-        data["SPX"] = spx["Close"]
-    except:
-        pass
-
-    try:
-        vix = yf.download("^VIX", start=start, progress=False)
-        data["VIX"] = vix["Close"]
-    except:
-        pass
-
-    try:
-        dxy = yf.download("DX-Y.NYB", start=start, progress=False)
-        data["DXY"] = dxy["Close"]
-    except:
-        pass
-
-    # ------------------------
-    # US 10Y (FRED - STRONG)
-    # ------------------------
-    try:
-        us10y = pdr.DataReader("DGS10", "fred", start)
-        data["US10Y"] = us10y["DGS10"]
-    except:
-        pass
+            continue
 
     if len(data) == 0:
         return pd.DataFrame()
 
     df = pd.concat(data.values(), axis=1)
+    df.columns = list(data.keys())
+
     return df.dropna(how="all")
 
 
 df = load_data()
 
 if df.empty:
-    st.warning("⚠️ Data not available. Try again.")
+    st.warning("⚠️ Data temporarily unavailable. Refresh after 1 minute.")
     st.stop()
 
 weekly = df.resample("W").last()
 
-# ------------------------
-# SIGNALS (SMART)
-# ------------------------
+# -----------------------
+# SIGNALS
+# -----------------------
 signals = {}
 
 if "DXY" in weekly:
@@ -94,16 +74,20 @@ if "US10Y" in weekly:
 
 signal_df = pd.DataFrame(signals)
 
+# -----------------------
+# SCORE
+# -----------------------
 if signal_df.empty:
+    st.warning("⚠️ Limited data. Using neutral score.")
     weekly["SCORE"] = 0
 else:
     weekly["SCORE"] = signal_df.sum(axis=1)
 
 latest = weekly.iloc[-1]
 
-# ------------------------
+# -----------------------
 # REGIME
-# ------------------------
+# -----------------------
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -114,9 +98,9 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
-# ------------------------
+# -----------------------
 # UI
-# ------------------------
+# -----------------------
 col1, col2 = st.columns(2)
 
 with col1:
@@ -128,5 +112,8 @@ with col2:
     st.subheader("Allocation")
     st.write(allocation)
 
+# -----------------------
+# CHART
+# -----------------------
 st.subheader("Market Trend")
 st.line_chart(weekly)
