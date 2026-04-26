@@ -5,7 +5,10 @@ import yfinance as yf
 import json
 from datetime import datetime
 
-st.set_page_config(page_title="Client Dashboard", layout="wide")
+# =====================
+# CONFIG
+# =====================
+st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 FILE = "clients.json"
 
@@ -68,20 +71,15 @@ score = int(sum(signals.values()))
 if score >= 2:
     regime = "RISK ON"
     model_equity = 70
-    screener_link = "https://www.screener.in/screens/1929320/"
-    screener_name = "Aggressive Growth Stocks"
-
+    screener_text = "Use Aggressive Growth Screener"
 elif score <= -2:
     regime = "RISK OFF"
     model_equity = 30
-    screener_link = "https://www.screener.in/screens/1929322/"
-    screener_name = "Defensive Stocks"
-
+    screener_text = "Use Defensive Screener"
 else:
     regime = "TRANSITION"
     model_equity = 50
-    screener_link = "https://www.screener.in/screens/1929318/"
-    screener_name = "Balanced Quality Stocks"
+    screener_text = "Use Balanced Screener"
 
 model_cash = 100 - model_equity
 
@@ -103,10 +101,10 @@ if selected == "New Client":
     value = st.sidebar.number_input("Portfolio Value", value=1000000)
 
     if st.sidebar.button("Save Client"):
-        if name.strip() != "":
+        if name.strip():
             clients[name] = {"equity": equity, "value": value}
             save_clients(clients)
-            st.sidebar.success("Saved")
+            st.sidebar.success("Saved successfully")
 
 else:
     data = clients[selected]
@@ -134,10 +132,10 @@ st.title(f"{name} - Portfolio Dashboard" if name else "Client Dashboard")
 # =====================
 # METRICS
 # =====================
-c1, c2, c3 = st.columns(3)
-c1.metric("Market Regime", regime)
-c2.metric("Model Score", score)
-c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
+col1, col2, col3 = st.columns(3)
+col1.metric("Market Regime", regime)
+col2.metric("Model Score", score)
+col3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 
 # =====================
 # ACTION
@@ -163,14 +161,56 @@ else:
 # =====================
 st.subheader("Portfolio Impact")
 
-current_equity_amt = value * (equity / 100)
-model_equity_amt = value * (model_equity / 100)
+current_equity_amt = value * equity / 100
+model_equity_amt = value * model_equity / 100
 
-col1, col2 = st.columns(2)
-col1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
-col2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
+c1, c2 = st.columns(2)
+c1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
+c2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
 
 # =====================
 # ADVISORY
 # =====================
-st.subheader
+st.subheader("Advisory")
+
+if regime == "RISK ON":
+    st.success("Markets strong → Increase equity exposure")
+elif regime == "RISK OFF":
+    st.error("Risk high → Protect capital, reduce equity")
+else:
+    st.warning("Mixed signals → Stay balanced")
+
+# =====================
+# SCREENER SUGGESTION
+# =====================
+st.subheader("Stock Selection Strategy")
+st.info(screener_text)
+
+# =====================
+# COMPARISON
+# =====================
+st.subheader("Portfolio Comparison")
+
+df_compare = pd.DataFrame({
+    "Client": [equity, cash],
+    "Model": [model_equity, model_cash]
+}, index=["Equity", "Cash"])
+
+st.bar_chart(df_compare)
+
+# =====================
+# MARKET TREND
+# =====================
+st.subheader("Market Trend")
+st.line_chart(df)
+
+# =====================
+# SIGNALS
+# =====================
+st.subheader("Macro Signals")
+st.table(pd.DataFrame(signals, index=["Signal"]).T)
+
+# =====================
+# FOOTER
+# =====================
+st.caption("For informational purposes only.")
