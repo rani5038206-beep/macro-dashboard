@@ -9,7 +9,7 @@ st.set_page_config(page_title="Client Dashboard", layout="wide")
 DATA_FILE = "clients.csv"
 
 # ---------------------------
-# INIT DATABASE
+# INIT DB
 # ---------------------------
 if not os.path.exists(DATA_FILE):
     pd.DataFrame(columns=["Name", "Equity", "Value"]).to_csv(DATA_FILE, index=False)
@@ -50,7 +50,7 @@ def load_data():
 df = load_data()
 
 if df is None:
-    st.error("❌ Market data unavailable")
+    st.error("Market data unavailable")
     st.stop()
 
 # ---------------------------
@@ -73,7 +73,7 @@ score = (
 )
 
 # ---------------------------
-# REGIME LOGIC
+# REGIME
 # ---------------------------
 if score >= 2:
     regime = "RISK ON"
@@ -92,7 +92,7 @@ else:
     message = "Maintain balanced allocation"
 
 # ---------------------------
-# SIDEBAR (FIXED UX)
+# SIDEBAR
 # ---------------------------
 st.sidebar.header("👤 Client Management")
 
@@ -100,7 +100,7 @@ client_list = clients_df["Name"].tolist()
 selected = st.sidebar.selectbox("Select Client", ["➕ New Client"] + client_list)
 
 # ---------------------------
-# NEW CLIENT FLOW
+# NEW CLIENT
 # ---------------------------
 if selected == "➕ New Client":
     st.title("➕ Create New Client")
@@ -111,18 +111,28 @@ if selected == "➕ New Client":
 
     if st.button("Save Client"):
         if name.strip() == "":
-            st.error("⚠️ Enter client name")
+            st.error("Enter client name")
         else:
             new = pd.DataFrame([[name, equity, value]],
                                columns=["Name", "Equity", "Value"])
             clients_df = pd.concat([clients_df, new], ignore_index=True)
             save_clients(clients_df)
-            st.success("✅ Client Saved")
 
-    st.stop()   # 🔴 IMPORTANT (stops dashboard from showing)
+            # ✅ AUTO REDIRECT
+            st.success("Client saved successfully!")
+            st.session_state["selected_client"] = name
+            st.rerun()
+
+    st.stop()
 
 # ---------------------------
-# EXISTING CLIENT FLOW
+# HANDLE REDIRECT
+# ---------------------------
+if "selected_client" in st.session_state:
+    selected = st.session_state["selected_client"]
+
+# ---------------------------
+# EXISTING CLIENT
 # ---------------------------
 row = clients_df[clients_df["Name"] == selected].iloc[0]
 
@@ -141,6 +151,7 @@ if col2.button("Delete"):
     clients_df = clients_df[clients_df["Name"] != name]
     save_clients(clients_df)
     st.sidebar.warning("Deleted")
+    st.rerun()
 
 cash = 100 - equity
 
@@ -167,7 +178,7 @@ else:
     st.warning(message)
 
 # ---------------------------
-# PORTFOLIO COMPARISON
+# COMPARISON
 # ---------------------------
 st.subheader("⚖️ Portfolio Comparison")
 
@@ -181,7 +192,7 @@ comparison = pd.DataFrame({
 st.bar_chart(comparison.T)
 
 # ---------------------------
-# ACTION ENGINE
+# ACTION
 # ---------------------------
 st.subheader("🚨 Action")
 
