@@ -36,7 +36,7 @@ def load_data():
             col = "Adj Close" if "Adj Close" in df.columns else "Close"
             data[name] = df[col]
 
-            time.sleep(1)  # avoid Yahoo rate limit
+            time.sleep(1)
 
         except:
             continue
@@ -59,49 +59,48 @@ if df.empty:
 weekly = df.resample("W").last()
 
 # =========================
-# SIGNALS (NO NaN)
+# STRONG SIGNAL ENGINE
 # =========================
 signals = {}
 
-if "DXY" in weekly:
-    ma = weekly["DXY"].rolling(20).mean()
-    signals["DXY"] = np.where(weekly["DXY"] > ma, -1, 1)
+def trend_signal(series, short=4, long=20):
+    ma_short = series.rolling(short).mean()
+    ma_long = series.rolling(long).mean()
+    return np.where(ma_short > ma_long, 1, -1)
 
 if "SPX" in weekly:
-    ma = weekly["SPX"].rolling(20).mean()
-    signals["SPX"] = np.where(weekly["SPX"] > ma, 1, -1)
+    signals["SPX"] = trend_signal(weekly["SPX"])
+
+if "DXY" in weekly:
+    signals["DXY"] = -trend_signal(weekly["DXY"])
 
 if "VIX" in weekly:
-    ma = weekly["VIX"].rolling(10).mean()
-    signals["VIX"] = np.where(weekly["VIX"] > ma, -1, 1)
+    signals["VIX"] = -trend_signal(weekly["VIX"], short=2, long=10)
 
 if "US10Y" in weekly:
-    ma = weekly["US10Y"].rolling(20).mean()
-    signals["US10Y"] = np.where(weekly["US10Y"] > ma, -1, 1)
+    signals["US10Y"] = -trend_signal(weekly["US10Y"])
 
-signal_df = pd.DataFrame(signals)
+signal_df = pd.DataFrame(signals).fillna(0)
 
 # =========================
-# SCORE (WEIGHTED FIX)
+# MOMENTUM BOOST (KEY FIX)
 # =========================
-if signal_df.empty:
-    weekly["SCORE"] = 0
-else:
-    signal_df = signal_df.fillna(0)
+momentum = {}
 
-    weights = {
-        "DXY": -2,
-        "SPX": 2,
-        "VIX": -2,
-        "US10Y": -1
-    }
+if "NIFTY" in weekly:
+    momentum["NIFTY"] = np.sign(weekly["NIFTY"].pct_change(4))
 
-    score = pd.Series(0, index=signal_df.index)
+if "BANK" in weekly:
+    momentum["BANK"] = np.sign(weekly["BANK"].pct_change(4))
 
-    for col in signal_df.columns:
-        score += signal_df[col] * weights.get(col, 0)
+mom_df = pd.DataFrame(momentum).fillna(0)
 
-    weekly["SCORE"] = score
+# =========================
+# FINAL SCORE (POWERFUL)
+# =========================
+score = signal_df.sum(axis=1) * 2 + mom_df.sum(axis=1)
+
+weekly["SCORE"] = score
 
 latest = weekly.iloc[-1]
 
@@ -109,13 +108,13 @@ if pd.isna(latest["SCORE"]):
     latest["SCORE"] = 0
 
 # =========================
-# REGIME LOGIC (IMPROVED)
+# REGIME (MORE SENSITIVE)
 # =========================
-if latest["SCORE"] <= -3:
+if latest["SCORE"] <= -4:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":10,"Bank":0,"IT":60,"Cash":30}
 
-elif latest["SCORE"] < 2:
+elif latest["SCORE"] <= 1:
     regime = "🟡 NEUTRAL"
     allocation = {"Nifty":30,"Bank":30,"IT":30,"Cash":10}
 
@@ -136,6 +135,12 @@ with col1:
 with col2:
     st.subheader("Allocation")
     st.write(allocation)
+
+# =========================
+# SIGNAL VIEW (IMPORTANT)
+# =========================
+st.subheader("Macro Signals")
+st.write(signal_df.tail(1))
 
 # =========================
 # CHART
