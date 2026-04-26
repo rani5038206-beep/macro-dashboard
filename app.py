@@ -16,7 +16,10 @@ def load_data():
         "^GSPC","^INDIAVIX","^TNX"
     ]
 
-    df = yf.download(tickers, start=start, group_by='ticker', threads=False)
+    try:
+        df = yf.download(tickers, start=start, group_by='ticker', threads=False)
+    except:
+        return pd.DataFrame()
 
     data = {}
 
@@ -35,7 +38,6 @@ def load_data():
     for ticker in tickers:
         try:
             sub = df[ticker]
-
             if sub is None or sub.empty:
                 continue
 
@@ -65,7 +67,6 @@ if missing:
     st.error(f"Missing data: {missing}")
     st.stop()
 
-# Signals
 weekly["DXY_S"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
 weekly["SPX_S"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
 weekly["VIX_S"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
@@ -75,7 +76,6 @@ weekly["SCORE"] = weekly[["DXY_S","SPX_S","VIX_S","USY_S"]].sum(axis=1)
 
 latest = weekly.iloc[-1]
 
-# Regime logic
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -86,7 +86,6 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
-# UI
 col1, col2 = st.columns(2)
 
 with col1:
