@@ -5,14 +5,14 @@ import yfinance as yf
 from datetime import datetime
 
 # =========================
-# PAGE CONFIG
+# CONFIG
 # =========================
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 # =========================
-# SAFE DATA FETCH (NO CRASH)
+# SAFE DATA FETCH (ANTI-RATE LIMIT)
 # =========================
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=600)  # 10 min cache (IMPORTANT)
 def get_data():
     try:
         data = yf.download(
@@ -22,25 +22,24 @@ def get_data():
             progress=False,
             auto_adjust=True,
             threads=False
-        )["Close"].dropna()
-        return data
-    except:
-        return pd.DataFrame()
+        )["Close"]
+
+        if data.empty:
+            raise ValueError("Empty data")
+
+        return data.dropna()
+
+    except Exception:
+        # Fallback synthetic data (NO FAILURE)
+        dates = pd.date_range(end=datetime.today(), periods=120)
+        return pd.DataFrame({
+            "SPX": np.linspace(3500, 4500, 120) + np.random.normal(0, 50, 120),
+            "DXY": np.linspace(95, 105, 120) + np.random.normal(0, 1, 120),
+            "VIX": np.linspace(20, 15, 120) + np.random.normal(0, 2, 120),
+            "US10Y": np.linspace(2.5, 4.0, 120) + np.random.normal(0, 0.2, 120),
+        }, index=dates)
 
 df = get_data()
-
-# =========================
-# FALLBACK (IF API FAILS)
-# =========================
-if df.empty:
-    dates = pd.date_range(end=datetime.today(), periods=100)
-    df = pd.DataFrame({
-        "SPX": np.random.normal(4000, 50, 100),
-        "DXY": np.random.normal(100, 2, 100),
-        "VIX": np.random.normal(18, 3, 100),
-        "US10Y": np.random.normal(3.5, 0.3, 100)
-    }, index=dates)
-
 df.columns = ["SPX", "DXY", "VIX", "US10Y"]
 
 # =========================
@@ -56,10 +55,10 @@ signals = {
     "US10Y": -1 if latest["US10Y"] > prev["US10Y"] else 1,
 }
 
-score = sum(signals.values())
+score = int(sum(signals.values()))
 
 # =========================
-# REGIME + ALLOCATION
+# REGIME ENGINE
 # =========================
 if score >= 2:
     regime = "RISK ON"
@@ -89,12 +88,11 @@ portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000
 cash_pct = 100 - equity_pct
 
 # =========================
-# MAIN HEADER
+# HEADER
 # =========================
 st.title(f"{client_name} - Portfolio Dashboard")
 
 col1, col2, col3 = st.columns(3)
-
 col1.metric("Market Regime", regime)
 col2.metric("Model Score", score)
 col3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
@@ -103,7 +101,13 @@ col3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 # ADVISORY
 # =========================
 st.subheader("Advisory")
-st.success(advice)
+
+if regime == "RISK ON":
+    st.success(advice)
+elif regime == "RISK OFF":
+    st.error(advice)
+else:
+    st.warning(advice)
 
 # =========================
 # PORTFOLIO COMPARISON
