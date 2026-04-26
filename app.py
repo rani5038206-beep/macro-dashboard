@@ -5,13 +5,13 @@ import yfinance as yf
 import json
 from datetime import datetime
 
-st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
+st.set_page_config(page_title="Client Dashboard", layout="wide")
 
-# =========================
-# STORAGE
-# =========================
 FILE = "clients.json"
 
+# =====================
+# CLIENT STORAGE
+# =====================
 def load_clients():
     try:
         with open(FILE, "r") as f:
@@ -25,9 +25,9 @@ def save_clients(data):
 
 clients = load_clients()
 
-# =========================
-# DATA (SAFE)
-# =========================
+# =====================
+# DATA
+# =====================
 @st.cache_data(ttl=600)
 def get_data():
     try:
@@ -50,9 +50,6 @@ def get_data():
 
 df = get_data()
 
-# =========================
-# SIGNAL ENGINE
-# =========================
 latest = df.iloc[-1]
 prev = df.iloc[-2]
 
@@ -65,50 +62,52 @@ signals = {
 
 score = int(sum(signals.values()))
 
-# =========================
-# REGIME
-# =========================
+# =====================
+# REGIME LOGIC
+# =====================
 if score >= 2:
     regime = "RISK ON"
-    alloc = {"Equity": 70, "Cash": 30}
-    advice = "Increase equity exposure"
+    model_equity = 70
+    message = "Increase equity exposure"
 elif score <= -2:
     regime = "RISK OFF"
-    alloc = {"Equity": 30, "Cash": 70}
-    advice = "Reduce equity exposure"
+    model_equity = 30
+    message = "Reduce equity exposure"
 else:
     regime = "TRANSITION"
-    alloc = {"Equity": 50, "Cash": 50}
-    advice = "Balanced approach"
+    model_equity = 50
+    message = "Stay balanced"
 
-# =========================
+model_cash = 100 - model_equity
+
+# =====================
 # SIDEBAR
-# =========================
+# =====================
 st.sidebar.header("Client Management")
 
-client_names = list(clients.keys())
-selected_client = st.sidebar.selectbox("Select Client", ["New Client"] + client_names)
+client_list = list(clients.keys())
+selected = st.sidebar.selectbox("Select Client", ["New Client"] + client_list)
 
-# DEFAULT VALUES
 name = ""
 equity = 60
 value = 1000000
 
-if selected_client == "New Client":
+if selected == "New Client":
     name = st.sidebar.text_input("Client Name")
     equity = st.sidebar.slider("Equity %", 0, 100, 60)
     value = st.sidebar.number_input("Portfolio Value", value=1000000)
 
     if st.sidebar.button("Save Client"):
         if name.strip() == "":
-            st.sidebar.error("Client name required")
+            st.sidebar.error("Enter client name")
         else:
             clients[name] = {"equity": equity, "value": value}
             save_clients(clients)
-            st.sidebar.success("Saved successfully")
+            st.sidebar.success("Saved")
+
 else:
-    data = clients[selected_client]
-    name = selected_client
+    data = clients[selected]
+    name = selected
     equity = st.sidebar.slider("Equity %", 0, 100, data["equity"])
     value = st.sidebar.number_input("Portfolio Value", value=data["value"])
 
@@ -124,55 +123,83 @@ else:
 
 cash = 100 - equity
 
-# =========================
-# TITLE FIX (IMPORTANT)
-# =========================
+# =====================
+# HEADER
+# =====================
 if name.strip() == "":
     st.title("Client Portfolio Dashboard")
 else:
     st.title(f"{name} - Portfolio Dashboard")
 
-# =========================
+# =====================
 # METRICS
-# =========================
+# =====================
 c1, c2, c3 = st.columns(3)
-c1.metric("Regime", regime)
-c2.metric("Score", score)
-c3.metric("Updated", datetime.today().strftime("%d %b %Y"))
+c1.metric("Market Regime", regime)
+c2.metric("Model Score", score)
+c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 
-# =========================
+# =====================
+# ACTION (IMPORTANT)
+# =====================
+st.subheader("Action Required")
+
+difference = model_equity - equity
+
+if difference > 0:
+    action = f"Increase Equity by {difference}%"
+    st.success(action)
+elif difference < 0:
+    action = f"Reduce Equity by {abs(difference)}%"
+    st.error(action)
+else:
+    action = "No Change Required"
+    st.info(action)
+
+# =====================
+# ₹ IMPACT (VERY IMPORTANT)
+# =====================
+st.subheader("Portfolio Impact")
+
+current_equity_amt = value * (equity / 100)
+model_equity_amt = value * (model_equity / 100)
+
+st.write(f"Current Equity: ₹{int(current_equity_amt):,}")
+st.write(f"Recommended Equity: ₹{int(model_equity_amt):,}")
+
+# =====================
 # ADVISORY
-# =========================
+# =====================
 st.subheader("Advisory")
 
 if regime == "RISK ON":
-    st.success(advice)
+    st.success("Markets are strong. Increasing equity is advised.")
 elif regime == "RISK OFF":
-    st.error(advice)
+    st.error("Risk is rising. Protect capital and reduce exposure.")
 else:
-    st.warning(advice)
+    st.warning("Mixed signals. Maintain balanced allocation.")
 
-# =========================
+# =====================
 # COMPARISON
-# =========================
+# =====================
 st.subheader("Portfolio Comparison")
 
 df_compare = pd.DataFrame({
     "Client": [equity, cash],
-    "Model": [alloc["Equity"], alloc["Cash"]]
+    "Model": [model_equity, model_cash]
 }, index=["Equity", "Cash"])
 
 st.bar_chart(df_compare)
 
-# =========================
-# TREND
-# =========================
+# =====================
+# MARKET TREND
+# =====================
 st.subheader("Market Trend")
 st.line_chart(df)
 
-# =========================
-# SIGNAL TABLE
-# =========================
+# =====================
+# SIGNALS
+# =====================
 st.subheader("Signals")
 st.table(pd.DataFrame(signals, index=["Signal"]).T)
 
