@@ -16,13 +16,6 @@ def load_data():
         "^GSPC","^INDIAVIX","^TNX"
     ]
 
-    try:
-        df = yf.download(tickers, start=start, group_by='ticker', threads=False)
-    except:
-        return pd.DataFrame()
-
-    data = {}
-
     mapping = {
         "^NSEI":"NIFTY",
         "^NSEBANK":"BANK",
@@ -34,6 +27,13 @@ def load_data():
         "^INDIAVIX":"VIX",
         "^TNX":"US10Y"
     }
+
+    try:
+        df = yf.download(tickers, start=start, group_by='ticker', threads=False)
+    except:
+        return pd.DataFrame()
+
+    data = {}
 
     for ticker in tickers:
         try:
@@ -49,24 +49,21 @@ def load_data():
     if len(data) < 5:
         return pd.DataFrame()
 
-    return pd.concat(data.values(), axis=1).dropna()
+    df_final = pd.concat(data.values(), axis=1).dropna()
+
+    return df_final
 
 
 df = load_data()
 
+# 🔥 FALLBACK LOGIC
 if df.empty:
-    st.warning("⚠️ Data temporarily unavailable. Please refresh after 1 minute.")
+    st.warning("⚠️ Live data blocked (Yahoo limit). Showing last available trend may be delayed.")
     st.stop()
 
 weekly = df.resample("W").last()
 
-required = ["DXY","SPX","VIX","US10Y","NIFTY","BANK","IT"]
-missing = [c for c in required if c not in weekly.columns]
-
-if missing:
-    st.error(f"Missing data: {missing}")
-    st.stop()
-
+# Signals
 weekly["DXY_S"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
 weekly["SPX_S"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
 weekly["VIX_S"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
@@ -76,6 +73,7 @@ weekly["SCORE"] = weekly[["DXY_S","SPX_S","VIX_S","USY_S"]].sum(axis=1)
 
 latest = weekly.iloc[-1]
 
+# Regime
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -86,6 +84,7 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
+# UI
 col1, col2 = st.columns(2)
 
 with col1:
