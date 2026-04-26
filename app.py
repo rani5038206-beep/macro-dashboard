@@ -5,9 +5,6 @@ import yfinance as yf
 import json
 from datetime import datetime
 
-# =====================
-# CONFIG
-# =====================
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 FILE = "clients.json"
@@ -44,12 +41,7 @@ def get_data():
         return df
     except:
         dates = pd.date_range(end=datetime.today(), periods=100)
-        return pd.DataFrame({
-            "SPX": np.random.rand(100)*1000+4000,
-            "DXY": np.random.rand(100)*10+95,
-            "VIX": np.random.rand(100)*5+15,
-            "US10Y": np.random.rand(100)+3
-        }, index=dates)
+        return pd.DataFrame(np.random.rand(100,4), columns=["SPX","DXY","VIX","US10Y"], index=dates)
 
 df = get_data()
 
@@ -66,22 +58,32 @@ signals = {
 score = int(sum(signals.values()))
 
 # =====================
-# REGIME LOGIC
+# REGIME
 # =====================
 if score >= 2:
     regime = "RISK ON"
     model_equity = 70
-    screener_text = "Use Aggressive Growth Screener"
 elif score <= -2:
     regime = "RISK OFF"
     model_equity = 30
-    screener_text = "Use Defensive Screener"
 else:
     regime = "TRANSITION"
     model_equity = 50
-    screener_text = "Use Balanced Screener"
 
 model_cash = 100 - model_equity
+
+# =====================
+# STOCK PICKS (STATIC BUT SMART)
+# =====================
+def get_stock_picks(regime):
+    if regime == "RISK ON":
+        return ["TCS", "Infosys", "HDFC Bank", "Reliance", "L&T"]
+    elif regime == "RISK OFF":
+        return ["ITC", "HUL", "Nestle", "Power Grid", "NTPC"]
+    else:
+        return ["HDFC Bank", "Infosys", "ITC", "L&T", "ICICI Bank"]
+
+stocks = get_stock_picks(regime)
 
 # =====================
 # SIDEBAR
@@ -104,7 +106,7 @@ if selected == "New Client":
         if name.strip():
             clients[name] = {"equity": equity, "value": value}
             save_clients(clients)
-            st.sidebar.success("Saved successfully")
+            st.sidebar.success("Saved")
 
 else:
     data = clients[selected]
@@ -132,10 +134,10 @@ st.title(f"{name} - Portfolio Dashboard" if name else "Client Dashboard")
 # =====================
 # METRICS
 # =====================
-col1, col2, col3 = st.columns(3)
-col1.metric("Market Regime", regime)
-col2.metric("Model Score", score)
-col3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
+c1, c2, c3 = st.columns(3)
+c1.metric("Market Regime", regime)
+c2.metric("Model Score", score)
+c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 
 # =====================
 # ACTION
@@ -164,9 +166,9 @@ st.subheader("Portfolio Impact")
 current_equity_amt = value * equity / 100
 model_equity_amt = value * model_equity / 100
 
-c1, c2 = st.columns(2)
-c1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
-c2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
+col1, col2 = st.columns(2)
+col1.metric("Current Equity", f"₹{int(current_equity_amt):,}")
+col2.metric("Recommended Equity", f"₹{int(model_equity_amt):,}")
 
 # =====================
 # ADVISORY
@@ -176,15 +178,17 @@ st.subheader("Advisory")
 if regime == "RISK ON":
     st.success("Markets strong → Increase equity exposure")
 elif regime == "RISK OFF":
-    st.error("Risk high → Protect capital, reduce equity")
+    st.error("Risk high → Protect capital")
 else:
     st.warning("Mixed signals → Stay balanced")
 
 # =====================
-# SCREENER SUGGESTION
+# STOCK PICKS
 # =====================
-st.subheader("Stock Selection Strategy")
-st.info(screener_text)
+st.subheader("Top Stock Picks")
+
+for stock in stocks:
+    st.write(f"• {stock}")
 
 # =====================
 # COMPARISON
@@ -207,10 +211,7 @@ st.line_chart(df)
 # =====================
 # SIGNALS
 # =====================
-st.subheader("Macro Signals")
+st.subheader("Signals")
 st.table(pd.DataFrame(signals, index=["Signal"]).T)
 
-# =====================
-# FOOTER
-# =====================
 st.caption("For informational purposes only.")
