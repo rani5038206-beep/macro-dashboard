@@ -6,13 +6,36 @@ import yfinance as yf
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 # =========================
-# 1. MACRO SIGNALS
+# 1. MACRO DATA (REAL)
 # =========================
+@st.cache_data(ttl=600)
+def get_macro_data():
+    try:
+        df = yf.download(
+            ["^GSPC","DX-Y.NYB","^VIX","^TNX"],
+            period="6mo",
+            progress=False
+        )["Close"].dropna()
+
+        df.columns = ["SPX","DXY","VIX","US10Y"]
+        return df
+    except:
+        return pd.DataFrame()
+
+df_macro = get_macro_data()
+
+if df_macro.empty:
+    st.error("Market data not available")
+    st.stop()
+
+latest = df_macro.iloc[-1]
+prev = df_macro.iloc[-2]
+
 signals = {
-    "SPX": 1,
-    "DXY": -1,
-    "VIX": 1,
-    "US10Y": 0
+    "SPX": 1 if latest["SPX"] > prev["SPX"] else -1,
+    "DXY": -1 if latest["DXY"] > prev["DXY"] else 1,
+    "VIX": -1 if latest["VIX"] > prev["VIX"] else 1,
+    "US10Y": -1 if latest["US10Y"] > prev["US10Y"] else 1
 }
 
 model_score = sum(signals.values())
@@ -31,13 +54,11 @@ else:
     model_equity = 50
 
 # =========================
-# 3. 🔥 YOUR SCREENER STOCKS
+# 3. YOUR SCREENER STOCKS
 # =========================
-# 👉 PASTE ALL 61 STOCKS HERE (VERY IMPORTANT)
 SCREENER_STOCKS = [
     "RELIANCE.NS","TCS.NS","INFY.NS","HDFCBANK.NS","ICICIBANK.NS",
     "LT.NS","SBIN.NS","AXISBANK.NS","BAJFINANCE.NS","SUNPHARMA.NS"
-    # 👉 ADD REST FROM SCREENER
 ]
 
 # =========================
@@ -51,35 +72,33 @@ def get_best_stocks():
 
         returns_1m = (data.iloc[-1] / data.iloc[-20] - 1)
         returns_3m = (data.iloc[-1] / data.iloc[0] - 1)
-        volatility = data.pct_change().std()
+        vol = data.pct_change().std()
 
         df = pd.DataFrame({
             "Stock": returns_1m.index,
             "R1M": returns_1m.values,
             "R3M": returns_3m.values,
-            "Vol": volatility.values
+            "Vol": vol.values
         })
 
-        # 🔥 SMART RANKING
-        df["Score"] = (df["R1M"] * 0.5) + (df["R3M"] * 0.4) - (df["Vol"] * 0.1)
+        df["Score"] = (df["R1M"]*0.5) + (df["R3M"]*0.4) - (df["Vol"]*0.1)
 
         df = df.sort_values("Score", ascending=False).head(5)
 
         latest_prices = data.iloc[-1]
 
-        results = []
+        result = []
         for _, row in df.iterrows():
-            stock = row["Stock"]
-
-            results.append({
-                "name": stock.replace(".NS",""),
-                "price": float(latest_prices[stock]),
+            s = row["Stock"]
+            result.append({
+                "name": s.replace(".NS",""),
+                "price": float(latest_prices[s]),
                 "score": float(row["Score"]),
-                "r1m": float(row["R1M"] * 100),
-                "r3m": float(row["R3M"] * 100)
+                "r1m": float(row["R1M"]*100),
+                "r3m": float(row["R3M"]*100)
             })
 
-        return results
+        return result
 
     except:
         return []
@@ -89,13 +108,23 @@ def get_best_stocks():
 # =========================
 st.title("Client Portfolio Dashboard")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Market Regime", regime)
-col2.metric("Model Score", model_score)
-col3.metric("Recommended Equity %", model_equity)
+c1,c2,c3 = st.columns(3)
+c1.metric("Market Regime", regime)
+c2.metric("Model Score", model_score)
+c3.metric("Equity Allocation", f"{model_equity}%")
 
 # =========================
-# 6. CLIENT INPUT
+# 6. MACRO SIGNAL DISPLAY
+# =========================
+st.subheader("Macro Signals")
+
+st.table(pd.DataFrame(signals, index=["Signal"]).T)
+
+st.subheader("Market Trend")
+st.line_chart(df_macro)
+
+# =========================
+# 7. CLIENT INPUT
 # =========================
 st.sidebar.header("Client Input")
 
@@ -103,7 +132,7 @@ client_equity = st.sidebar.slider("Equity %", 0, 100, 60)
 portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
 
 # =========================
-# 7. ACTION
+# 8. ACTION
 # =========================
 st.subheader("Action Required")
 
@@ -117,36 +146,25 @@ else:
     st.info("Portfolio aligned")
 
 # =========================
-# 8. PORTFOLIO IMPACT
+# 9. STOCK PICKS + ALLOCATION
 # =========================
-st.subheader("Portfolio Impact")
-
-current_equity = portfolio_value * client_equity / 100
-recommended_equity = portfolio_value * model_equity / 100
-
-st.write(f"Current Equity: ₹{current_equity:,.0f}")
-st.write(f"Recommended Equity: ₹{recommended_equity:,.0f}")
-
-# =========================
-# 9. 🔥 STOCK PICKS + POSITION SIZING
-# =========================
-st.subheader("🚀 Best Stocks (From Screener + Real-Time Ranking)")
+st.subheader("Top Stocks (Screener + Real-Time)")
 
 stocks = get_best_stocks()
 
+recommended_equity = portfolio_value * model_equity / 100
+
 if stocks:
 
-    total_equity = recommended_equity
     total_score = sum([abs(s["score"]) for s in stocks])
 
     for s in stocks:
 
         weight = abs(s["score"]) / total_score if total_score != 0 else 1/len(stocks)
-        allocation = total_equity * weight
+        allocation = recommended_equity * weight
 
         price = s["price"]
         units = int(allocation / price) if price > 0 else 0
-        invested = units * price
 
         st.markdown(f"""
 ### {s['name']}
@@ -156,18 +174,17 @@ if stocks:
 • 3M Return: {s['r3m']:.2f}%  
 
 👉 Allocation: ₹{allocation:,.0f}  
-👉 Units to Buy: {units}  
-👉 Invested Value: ₹{invested:,.0f}  
+👉 Units: {units}
 
 ---
 """)
 
 else:
-    st.warning("No stock data available")
+    st.warning("No stock data")
 
 # =========================
-# 10. REFRESH BUTTON
+# 10. REFRESH
 # =========================
 if st.button("🔄 Refresh Market Data"):
     st.cache_data.clear()
-    st.success("Market data refreshed")
+    st.success("Updated")
