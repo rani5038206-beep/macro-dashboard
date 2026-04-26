@@ -11,7 +11,7 @@ st.caption("Model-driven asset allocation | For client communication")
 start = "2018-01-01"
 
 # =========================
-# DATA LOADING (STABLE)
+# DATA LOADING (SAFE)
 # =========================
 @st.cache_data(ttl=3600)
 def load_data():
@@ -56,8 +56,8 @@ def load_data():
 
 df = load_data()
 
-if df is None:
-    st.error("⚠️ Data temporarily unavailable. Please check later.")
+if df is None or df.empty:
+    st.error("⚠️ Data temporarily unavailable. Try again later.")
     st.stop()
 
 # =========================
@@ -66,23 +66,38 @@ if df is None:
 weekly = df.resample("W").last()
 
 # =========================
-# MACRO SIGNALS
+# MACRO SIGNALS (SAFE)
 # =========================
 signal = pd.DataFrame(index=weekly.index)
 
-signal["SPX"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
-signal["DXY"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -2, 2)
-signal["VIX"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(20).mean(), -3, 3)
-signal["US10Y"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -2, 2)
+def safe_signal(col, invert=False):
+    if col not in weekly.columns:
+        return pd.Series(0, index=weekly.index)
+
+    ma = weekly[col].rolling(20).mean()
+    if invert:
+        return np.where(weekly[col] > ma, -1, 1)
+    else:
+        return np.where(weekly[col] > ma, 1, -1)
+
+signal["SPX"] = safe_signal("SPX")
+signal["DXY"] = safe_signal("DXY", invert=True)
+signal["VIX"] = safe_signal("VIX", invert=True)
+signal["US10Y"] = safe_signal("US10Y", invert=True)
 
 # =========================
 # MOMENTUM (INDIA)
 # =========================
 mom = pd.DataFrame(index=weekly.index)
 
-mom["NIFTY"] = np.where(weekly["NIFTY"].pct_change(12) > 0, 2, -2)
-mom["BANK"] = np.where(weekly["BANK"].pct_change(12) > 0, 1, -1)
-mom["IT"] = np.where(weekly["IT"].pct_change(12) > 0, 1, -1)
+def safe_momentum(col):
+    if col not in weekly.columns:
+        return pd.Series(0, index=weekly.index)
+    return np.where(weekly[col].pct_change(12) > 0, 1, -1)
+
+mom["NIFTY"] = safe_momentum("NIFTY")
+mom["BANK"] = safe_momentum("BANK")
+mom["IT"] = safe_momentum("IT")
 
 # =========================
 # FINAL SCORE
@@ -91,7 +106,7 @@ macro_score = signal.sum(axis=1)
 momentum_score = mom.sum(axis=1)
 final_score = (macro_score * 2) + momentum_score
 
-latest_score = final_score.iloc[-1]
+latest_score = float(final_score.iloc[-1])
 
 # =========================
 # REGIME
@@ -107,7 +122,7 @@ else:
     color = "🟡"
 
 # =========================
-# CLIENT-FRIENDLY ALLOCATION
+# ALLOCATION LOGIC
 # =========================
 if latest_score >= 6:
     allocation = {"Nifty": 60, "Bank": 25, "IT": 15, "Cash": 0}
@@ -126,7 +141,7 @@ else:
     message = "High risk environment. Preserve capital."
 
 # =========================
-# TOP SECTION (CLIENT VIEW)
+# TOP METRICS (FIXED)
 # =========================
 col1, col2, col3 = st.columns(3)
 
@@ -134,15 +149,16 @@ with col1:
     st.metric("Market Regime", f"{color} {regime}")
 
 with col2:
-    st.metric("Model Score", round(float(latest_score), 2))
+    st.metric("Model Score", f"{latest_score:.1f}")
 
 with col3:
-    st.metric("Last Updated", df.index[-1].date())
+    last_date = df.index[-1]
+    st.metric("Last Updated", last_date.strftime("%d %b %Y"))
 
 st.info(f"📌 Advisory View: {message}")
 
 # =========================
-# ALLOCATION
+# ALLOCATION CHART
 # =========================
 st.subheader("📊 Recommended Allocation")
 
@@ -150,22 +166,17 @@ alloc_df = pd.DataFrame(list(allocation.items()), columns=["Asset", "Weight"])
 st.bar_chart(alloc_df.set_index("Asset"))
 
 # =========================
-# SIGNAL BREAKDOWN
+# SIGNAL TABLE
 # =========================
 st.subheader("🧠 Macro Signals (Latest)")
 
 latest_signals = signal.tail(1).T
 latest_signals.columns = ["Signal"]
 
-def signal_label(x):
-    if x > 0:
-        return "Positive"
-    elif x < 0:
-        return "Negative"
-    else:
-        return "Neutral"
+def label(x):
+    return "Positive" if x > 0 else "Negative"
 
-latest_signals["Interpretation"] = latest_signals["Signal"].apply(signal_label)
+latest_signals["View"] = latest_signals["Signal"].apply(label)
 
 st.dataframe(latest_signals)
 
@@ -174,15 +185,15 @@ st.dataframe(latest_signals)
 # =========================
 st.subheader("📈 Market Trend")
 
-chart_cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
+cols = [c for c in ["NIFTY", "BANK", "IT"] if c in df.columns]
 
-if chart_cols:
-    st.line_chart(df[chart_cols])
+if cols:
+    st.line_chart(df[cols])
 else:
     st.warning("Chart data unavailable")
 
 # =========================
-# FOOTER (IMPORTANT)
+# FOOTER
 # =========================
 st.markdown("---")
-st.caption("This model is for informational purposes only. Not investment advice.")
+st.caption("For informational purposes only. Not investment advice.")
