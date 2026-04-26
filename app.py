@@ -10,13 +10,7 @@ start = "2018-01-01"
 
 @st.cache_data(ttl=3600)
 def load_data():
-    tickers = [
-        "^NSEI","^NSEBANK","^CNXIT",
-        "INR=X","BZ=F","DX-Y.NYB",
-        "^GSPC","^INDIAVIX","^TNX"
-    ]
-
-    mapping = {
+    tickers = {
         "^NSEI":"NIFTY",
         "^NSEBANK":"BANK",
         "^CNXIT":"IT",
@@ -29,51 +23,64 @@ def load_data():
     }
 
     try:
-        df = yf.download(tickers, start=start, group_by='ticker', threads=False)
+        raw = yf.download(list(tickers.keys()), start=start, group_by="ticker", threads=False)
     except:
         return pd.DataFrame()
 
     data = {}
 
-    for ticker in tickers:
+    for t, name in tickers.items():
         try:
-            sub = df[ticker]
+            sub = raw[t]
             if sub is None or sub.empty:
                 continue
 
             col = "Adj Close" if "Adj Close" in sub.columns else "Close"
-            data[mapping[ticker]] = sub[col]
+            data[name] = sub[col]
         except:
             continue
 
-    if len(data) < 5:
+    if len(data) < 3:  # minimum requirement
         return pd.DataFrame()
 
-    df_final = pd.concat(data.values(), axis=1).dropna()
-
-    return df_final
+    return pd.concat(data.values(), axis=1).dropna()
 
 
 df = load_data()
 
-# 🔥 FALLBACK LOGIC
 if df.empty:
-    st.warning("⚠️ Live data blocked (Yahoo limit). Showing last available trend may be delayed.")
+    st.warning("⚠️ Data not available. Refresh after 1 minute.")
     st.stop()
 
 weekly = df.resample("W").last()
 
-# Signals
-weekly["DXY_S"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
-weekly["SPX_S"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
-weekly["VIX_S"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
-weekly["USY_S"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
+signals = {}
 
-weekly["SCORE"] = weekly[["DXY_S","SPX_S","VIX_S","USY_S"]].sum(axis=1)
+# Only compute if data exists
+if "DXY" in weekly:
+    signals["DXY"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
+
+if "SPX" in weekly:
+    signals["SPX"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
+
+if "VIX" in weekly:
+    signals["VIX"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
+
+if "US10Y" in weekly:
+    signals["US10Y"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
+
+# Combine signals safely
+signal_df = pd.DataFrame(signals)
+
+if signal_df.empty:
+    st.warning("⚠️ Signals not available yet.")
+    st.stop()
+
+weekly["SCORE"] = signal_df.sum(axis=1)
 
 latest = weekly.iloc[-1]
 
-# Regime
+# Regime logic
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -96,5 +103,9 @@ with col2:
     st.subheader("Allocation")
     st.write(allocation)
 
-st.subheader("Market Trend")
-st.line_chart(weekly[["NIFTY","BANK","IT"]])
+# Chart (only available columns)
+available_cols = [c for c in ["NIFTY","BANK","IT"] if c in weekly.columns]
+
+if available_cols:
+    st.subheader("Market Trend")
+    st.line_chart(weekly[available_cols])
