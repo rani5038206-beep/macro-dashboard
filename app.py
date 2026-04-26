@@ -73,17 +73,37 @@ else:
 model_cash = 100 - model_equity
 
 # =====================
-# STOCK PICKS (STATIC BUT SMART)
+# DYNAMIC STOCK ENGINE
 # =====================
-def get_stock_picks(regime):
-    if regime == "RISK ON":
-        return ["TCS", "Infosys", "HDFC Bank", "Reliance", "L&T"]
-    elif regime == "RISK OFF":
-        return ["ITC", "HUL", "Nestle", "Power Grid", "NTPC"]
-    else:
+def get_dynamic_stocks(regime):
+    
+    # Base universe (India large caps)
+    universe = [
+        "RELIANCE.NS", "TCS.NS", "INFY.NS", "HDFCBANK.NS",
+        "ICICIBANK.NS", "LT.NS", "ITC.NS", "HINDUNILVR.NS",
+        "SBIN.NS", "AXISBANK.NS"
+    ]
+    
+    try:
+        data = yf.download(universe, period="3mo", progress=False)["Close"]
+        
+        returns = (data.iloc[-1] / data.iloc[0] - 1).sort_values(ascending=False)
+        
+        if regime == "RISK ON":
+            picks = returns.head(5).index.tolist()
+            
+        elif regime == "RISK OFF":
+            picks = returns.tail(5).index.tolist()
+            
+        else:
+            picks = returns.iloc[2:7].index.tolist()
+            
+        return [s.replace(".NS","") for s in picks]
+    
+    except:
         return ["HDFC Bank", "Infosys", "ITC", "L&T", "ICICI Bank"]
 
-stocks = get_stock_picks(regime)
+stocks = get_dynamic_stocks(regime)
 
 # =====================
 # SIDEBAR
@@ -183,9 +203,9 @@ else:
     st.warning("Mixed signals → Stay balanced")
 
 # =====================
-# STOCK PICKS
+# STOCK PICKS (DYNAMIC)
 # =====================
-st.subheader("Top Stock Picks")
+st.subheader("Top Stock Picks (Dynamic)")
 
 for stock in stocks:
     st.write(f"• {stock}")
