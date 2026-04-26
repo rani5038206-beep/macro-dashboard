@@ -1,8 +1,28 @@
-# =====================
-# ADVANCED STOCK PICKS
-# =====================
+# =========================
+# 1. CALCULATE MODEL FIRST
+# =========================
+
+# Example (your logic)
+score = model_score  # already calculated above
+
+if score >= 2:
+    regime = "RISK ON"
+    model_equity = 70
+
+elif score <= -2:
+    regime = "RISK OFF"
+    model_equity = 30
+
+else:
+    regime = "TRANSITION"
+    model_equity = 50
+
+
+# =========================
+# 2. STOCK FUNCTION
+# =========================
 def get_stock_details(regime):
-    
+
     universe = {
         "RELIANCE.NS": "Large cap growth",
         "TCS.NS": "Stable IT leader",
@@ -18,8 +38,8 @@ def get_stock_details(regime):
 
     try:
         data = yf.download(list(universe.keys()), period="3mo", progress=False)["Close"]
-        latest_prices = data.iloc[-1]
 
+        latest_prices = data.iloc[-1]
         returns = (data.iloc[-1] / data.iloc[0] - 1).sort_values(ascending=False)
 
         if regime == "RISK ON":
@@ -42,11 +62,11 @@ def get_stock_details(regime):
                 risk = "Medium"
 
             elif regime == "RISK OFF":
-                reason = "Defensive / stable"
+                reason = "Defensive"
                 risk = "Low"
 
             else:
-                reason = "Balanced exposure"
+                reason = "Balanced"
                 risk = "Medium"
 
             results.append({
@@ -60,16 +80,20 @@ def get_stock_details(regime):
 
     except:
         return [
-            {"name": "HDFC Bank", "price": "-", "reason": "Stable leader", "risk": "Low"},
-            {"name": "Infosys", "price": "-", "reason": "Tech exposure", "risk": "Medium"},
+            {"name": "HDFC Bank", "price": "-", "reason": "Stable", "risk": "Low"},
+            {"name": "Infosys", "price": "-", "reason": "Tech", "risk": "Medium"}
         ]
 
 
+# =========================
+# 3. CALL FUNCTION (NOW SAFE)
+# =========================
 stocks = get_stock_details(regime)
 
-# =====================
-# DISPLAY STOCKS
-# =====================
+
+# =========================
+# 4. DISPLAY
+# =========================
 st.subheader("Top Stock Picks (Actionable)")
 
 for s in stocks:
