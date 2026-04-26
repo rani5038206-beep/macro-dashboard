@@ -6,7 +6,7 @@ import yfinance as yf
 st.set_page_config(page_title="Client Dashboard", layout="wide")
 
 # ---------------------------
-# LOAD DATA (ROBUST)
+# LOAD DATA
 # ---------------------------
 @st.cache_data(ttl=3600)
 def load_data():
@@ -38,11 +38,11 @@ def load_data():
 df = load_data()
 
 if df is None:
-    st.error("❌ Data not loading. Try again later.")
+    st.error("❌ Data not loading")
     st.stop()
 
 # ---------------------------
-# SIGNAL ENGINE
+# SIGNALS
 # ---------------------------
 weekly = df.resample("W").last()
 
@@ -61,31 +61,33 @@ score = (
 )
 
 # ---------------------------
-# REGIME LOGIC
+# REGIME
 # ---------------------------
 if score >= 2:
     regime = "RISK ON"
     color = "🟢"
     allocation = {"Equity": 80, "Cash": 20}
-    message = "Markets are supportive. Increasing equity exposure is recommended."
-    reason = "Strong equity trend + low volatility + weak dollar"
+    message = "Increase equity exposure"
+    reason = "Strong trend + low volatility + weak dollar"
 elif score <= -2:
     regime = "RISK OFF"
     color = "🔴"
     allocation = {"Equity": 40, "Cash": 60}
-    message = "Risk is elevated. Reduce equity exposure."
-    reason = "Rising volatility + strong dollar + weakening equity trend"
+    message = "Reduce equity exposure"
+    reason = "High volatility + strong dollar + weak trend"
 else:
     regime = "TRANSITION"
     color = "🟡"
     allocation = {"Equity": 60, "Cash": 40}
-    message = "Mixed signals. Maintain balanced allocation."
-    reason = "Conflicting macro indicators"
+    message = "Maintain balanced allocation"
+    reason = "Mixed macro signals"
 
 # ---------------------------
-# SIDEBAR
+# SIDEBAR (UPGRADED)
 # ---------------------------
-st.sidebar.header("👤 Client Portfolio")
+st.sidebar.header("👤 Client Profile")
+
+client_name = st.sidebar.text_input("Client Name", "Client A")
 
 equity = st.sidebar.slider("Equity %", 0, 100, 60)
 cash = 100 - equity
@@ -97,7 +99,7 @@ portfolio_value = st.sidebar.number_input(
 # ---------------------------
 # HEADER
 # ---------------------------
-st.title("📊 Caring Click - Client Dashboard")
+st.title(f"📊 {client_name} - Portfolio Dashboard")
 
 st.markdown("### 📌 Market Snapshot")
 
@@ -108,13 +110,13 @@ col2.metric("Model Score", f"{score:.1f}")
 col3.metric("Last Updated", df.index[-1].strftime("%d %b %Y"))
 
 # ---------------------------
-# ADVISORY BLOCK (STRONG)
+# ADVISORY
 # ---------------------------
 st.markdown("### 📢 Advisory Decision")
 
 if "Reduce" in message:
     st.error(f"🚨 {message}")
-elif "Increasing" in message:
+elif "Increase" in message:
     st.success(f"🚀 {message}")
 else:
     st.warning(f"⚖️ {message}")
@@ -122,7 +124,7 @@ else:
 st.markdown(f"**Why? → {reason}**")
 
 # ---------------------------
-# PORTFOLIO COMPARISON
+# COMPARISON
 # ---------------------------
 st.markdown("### ⚖️ Portfolio Comparison")
 
@@ -137,34 +139,19 @@ comparison = pd.DataFrame({
 st.bar_chart(comparison.T)
 
 # ---------------------------
-# ACTION ENGINE
+# ACTION ENGINE (STRONG)
 # ---------------------------
-st.markdown("### 🚨 Required Action")
+st.markdown("### 🚨 Final Recommendation")
 
 diff = model_alloc["Equity"] - equity
-
-if diff > 10:
-    action = f"Increase Equity by {diff}%"
-elif diff < -10:
-    action = f"Reduce Equity by {abs(diff)}%"
-else:
-    action = "No major change required"
-
-if "Reduce" in action:
-    st.error(f"🚨 {action}")
-elif "Increase" in action:
-    st.success(f"🚀 {action}")
-else:
-    st.info(f"✅ {action}")
-
-# ---------------------------
-# ₹ IMPACT
-# ---------------------------
-st.markdown("### 💰 Impact (₹)")
-
 change_amount = portfolio_value * abs(diff) / 100
 
-st.metric("Suggested Shift", f"₹ {int(change_amount):,}")
+if diff > 10:
+    st.success(f"🚀 BUY EQUITY: Increase by {diff}% (₹ {int(change_amount):,})")
+elif diff < -10:
+    st.error(f"🚨 SELL EQUITY: Reduce by {abs(diff)}% (₹ {int(change_amount):,})")
+else:
+    st.info("✅ HOLD: No major change required")
 
 # ---------------------------
 # MACRO SIGNALS
