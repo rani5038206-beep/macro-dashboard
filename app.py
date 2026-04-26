@@ -9,7 +9,7 @@ st.title("📊 Macro Allocation Dashboard")
 start = "2018-01-01"
 
 # =========================
-# BULK DATA DOWNLOAD (SAFE)
+# BULK DATA DOWNLOAD
 # =========================
 @st.cache_data(ttl=3600)
 def load_data():
@@ -33,7 +33,6 @@ def load_data():
         )
 
         data = {}
-
         for name, ticker in tickers.items():
             try:
                 data[name] = raw[ticker]["Close"]
@@ -65,7 +64,7 @@ if df is None:
 weekly = df.resample("W").last()
 
 # =========================
-# MACRO SIGNALS (STRONG)
+# MACRO SIGNALS
 # =========================
 signal = pd.DataFrame(index=weekly.index)
 
@@ -90,7 +89,6 @@ macro_score = signal.sum(axis=1)
 momentum_score = mom.sum(axis=1)
 
 final_score = (macro_score * 2) + momentum_score
-
 latest_score = final_score.iloc[-1]
 
 # =========================
@@ -104,14 +102,18 @@ else:
     regime = "TRANSITION"
 
 # =========================
-# ALLOCATION
+# DYNAMIC ALLOCATION (UPGRADE)
 # =========================
-if regime == "RISK ON":
+if latest_score >= 6:
+    allocation = {"Nifty": 60, "Bank": 25, "IT": 15, "Cash": 0}
+elif latest_score >= 3:
     allocation = {"Nifty": 50, "Bank": 30, "IT": 20, "Cash": 0}
-elif regime == "RISK OFF":
-    allocation = {"Nifty": 10, "Bank": 10, "IT": 20, "Cash": 60}
-else:
+elif latest_score >= 0:
     allocation = {"Nifty": 30, "Bank": 30, "IT": 20, "Cash": 20}
+elif latest_score >= -3:
+    allocation = {"Nifty": 20, "Bank": 20, "IT": 20, "Cash": 40}
+else:
+    allocation = {"Nifty": 10, "Bank": 10, "IT": 20, "Cash": 60}
 
 # =========================
 # UI
