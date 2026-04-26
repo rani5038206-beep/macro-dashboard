@@ -9,6 +9,9 @@ st.title("📊 Macro Allocation Dashboard")
 
 start = "2018-01-01"
 
+# =========================
+# DATA LOADER (ROBUST)
+# =========================
 @st.cache_data(ttl=3600)
 def load_data():
     tickers = {
@@ -33,7 +36,7 @@ def load_data():
             col = "Adj Close" if "Adj Close" in df.columns else "Close"
             data[name] = df[col]
 
-            time.sleep(1)  # 🔥 avoid rate limit
+            time.sleep(1)  # avoid rate limit
 
         except:
             continue
@@ -50,44 +53,53 @@ def load_data():
 df = load_data()
 
 if df.empty:
-    st.warning("⚠️ Data temporarily unavailable. Refresh after 1 minute.")
+    st.warning("⚠️ Data unavailable. Refresh after 1 minute.")
     st.stop()
 
 weekly = df.resample("W").last()
 
-# -----------------------
-# SIGNALS
-# -----------------------
+# =========================
+# SIGNALS (SAFE + NO NaN)
+# =========================
 signals = {}
 
 if "DXY" in weekly:
-    signals["DXY"] = np.where(weekly["DXY"] > weekly["DXY"].rolling(20).mean(), -1, 1)
+    dxy_ma = weekly["DXY"].rolling(20).mean()
+    signals["DXY"] = np.where(weekly["DXY"] > dxy_ma, -1, 1)
 
 if "SPX" in weekly:
-    signals["SPX"] = np.where(weekly["SPX"] > weekly["SPX"].rolling(20).mean(), 1, -1)
+    spx_ma = weekly["SPX"].rolling(20).mean()
+    signals["SPX"] = np.where(weekly["SPX"] > spx_ma, 1, -1)
 
 if "VIX" in weekly:
-    signals["VIX"] = np.where(weekly["VIX"] > weekly["VIX"].rolling(10).mean(), -1, 1)
+    vix_ma = weekly["VIX"].rolling(10).mean()
+    signals["VIX"] = np.where(weekly["VIX"] > vix_ma, -1, 1)
 
 if "US10Y" in weekly:
-    signals["US10Y"] = np.where(weekly["US10Y"] > weekly["US10Y"].rolling(20).mean(), -1, 1)
+    usy_ma = weekly["US10Y"].rolling(20).mean()
+    signals["US10Y"] = np.where(weekly["US10Y"] > usy_ma, -1, 1)
 
 signal_df = pd.DataFrame(signals)
 
-# -----------------------
-# SCORE
-# -----------------------
+# =========================
+# SCORE (FIXED PROPERLY)
+# =========================
 if signal_df.empty:
     st.warning("⚠️ Limited data. Using neutral score.")
     weekly["SCORE"] = 0
 else:
+    signal_df = signal_df.fillna(0)  # 🔥 critical fix
     weekly["SCORE"] = signal_df.sum(axis=1)
 
 latest = weekly.iloc[-1]
 
-# -----------------------
-# REGIME
-# -----------------------
+# safety fix
+if pd.isna(latest["SCORE"]):
+    latest["SCORE"] = 0
+
+# =========================
+# REGIME LOGIC
+# =========================
 if latest["SCORE"] <= -2:
     regime = "🔴 RISK OFF"
     allocation = {"Nifty":20,"Bank":0,"IT":50,"Cash":30}
@@ -98,9 +110,9 @@ else:
     regime = "🟢 RISK ON"
     allocation = {"Nifty":50,"Bank":30,"IT":20,"Cash":0}
 
-# -----------------------
-# UI
-# -----------------------
+# =========================
+# UI DISPLAY
+# =========================
 col1, col2 = st.columns(2)
 
 with col1:
@@ -112,8 +124,8 @@ with col2:
     st.subheader("Allocation")
     st.write(allocation)
 
-# -----------------------
+# =========================
 # CHART
-# -----------------------
+# =========================
 st.subheader("Market Trend")
 st.line_chart(weekly)
