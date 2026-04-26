@@ -18,49 +18,48 @@ st.sidebar.header("Macro Input")
 india_10y = st.sidebar.number_input("India 10Y Yield (%)", value=7.1)
 
 # ===============================
-# SAFE MACRO DATA FETCH
+# SAFE DATA FETCH
 # ===============================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
+def safe_download(ticker):
+    try:
+        df = yf.download(ticker, period="3mo", progress=False)
+        if df.empty or "Close" not in df:
+            return pd.Series(dtype=float)
+        return df["Close"].dropna()
+    except:
+        return pd.Series(dtype=float)
+
+# ===============================
+# MACRO DATA
+# ===============================
 def get_macro_data():
-    tickers = {
-        "SPX": "^GSPC",
-        "DXY": "DX-Y.NYB",
-        "INDIAVIX": "^INDIAVIX",
-        "USDINR": "INR=X",
-        "CRUDE": "CL=F"
+    return {
+        "SPX": safe_download("^GSPC"),
+        "DXY": safe_download("DX-Y.NYB"),
+        "INDIAVIX": safe_download("^INDIAVIX"),
+        "USDINR": safe_download("INR=X"),
+        "CRUDE": safe_download("CL=F")
     }
 
-    data = {}
-
-    for k, t in tickers.items():
-        try:
-            df = yf.download(t, period="3mo", progress=False)
-
-            if df.empty or "Close" not in df:
-                data[k] = pd.Series(dtype=float)
-            else:
-                data[k] = df["Close"].dropna()
-
-        except:
-            data[k] = pd.Series(dtype=float)
-
-    return data
-
 # ===============================
-# ROBUST SIGNAL FUNCTION
+# BULLETPROOF SIGNAL
 # ===============================
 def get_signal(series):
     try:
         if series is None or len(series) < 20:
             return 0
 
-        series = series.dropna()
+        series = pd.Series(series).dropna()
 
         if len(series) < 20:
             return 0
 
-        last = float(series.iloc[-1])
-        prev = float(series.iloc[-20])
+        last = float(np.array(series.iloc[-1]).item())
+        prev = float(np.array(series.iloc[-20]).item())
+
+        if np.isnan(last) or np.isnan(prev):
+            return 0
 
         return 1 if last > prev else -1
 
@@ -68,7 +67,7 @@ def get_signal(series):
         return 0
 
 # ===============================
-# INDIA IMPACT LOGIC
+# INDIA IMPACT
 # ===============================
 def india_impact(factor, signal):
     mapping = {
@@ -79,7 +78,6 @@ def india_impact(factor, signal):
         "CRUDE": (-1, 1),
         "INDIA10Y": (-1, 1)
     }
-
     pos, neg = mapping.get(factor, (0, 0))
     return "Positive" if signal == pos else "Negative"
 
@@ -88,11 +86,11 @@ def india_impact(factor, signal):
 # ===============================
 def explain(factor, signal):
     logic = {
-        "SPX": ("Global markets strong → supports India" if signal==1 else "Global weakness → risk off"),
+        "SPX": ("Global markets rising → supports India" if signal==1 else "Global weakness → risk off"),
         "DXY": ("Weak dollar → FII inflow" if signal==-1 else "Strong dollar → FII outflow"),
         "INDIAVIX": ("Low volatility → stable market" if signal==-1 else "High volatility → fear"),
-        "USDINR": ("Rupee strong → stability" if signal==-1 else "Rupee weak → pressure"),
-        "CRUDE": ("Low crude → good for India" if signal==-1 else "High crude → inflation risk"),
+        "USDINR": ("Rupee strong → macro stability" if signal==-1 else "Rupee weak → pressure"),
+        "CRUDE": ("Low crude → positive for India" if signal==-1 else "High crude → inflation risk"),
         "INDIA10Y": ("Lower yields → growth support" if signal==-1 else "Higher yields → cost pressure")
     }
     return logic.get(factor, "")
@@ -102,11 +100,9 @@ def explain(factor, signal):
 # ===============================
 data = get_macro_data()
 
-signals = {}
-for k, v in data.items():
-    signals[k] = get_signal(v)
+signals = {k: get_signal(v) for k, v in data.items()}
 
-# manual India 10Y
+# Manual India 10Y
 signals["INDIA10Y"] = 1 if india_10y > 7 else -1
 
 weights = {
@@ -132,7 +128,7 @@ else:
     equity_alloc = 50
 
 # ===============================
-# HEADER
+# UI HEADER
 # ===============================
 st.title("Macro → Micro Portfolio Engine")
 
@@ -159,7 +155,7 @@ st.dataframe(pd.DataFrame(rows), use_container_width=True)
 # ===============================
 # STOCK ENGINE
 # ===============================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def get_stocks():
     universe = [
         "RELIANCE.NS","HDFCBANK.NS","ICICIBANK.NS","INFY.NS","TCS.NS",
@@ -210,12 +206,12 @@ def get_stocks():
 top_stocks = get_stocks()
 
 # ===============================
-# DISPLAY STOCKS
+# STOCK DISPLAY
 # ===============================
 st.subheader("Top 10 Stock Selection")
 
 if top_stocks.empty:
-    st.warning("No stocks passed filter today")
+    st.warning("No stocks passed filter")
 else:
     st.dataframe(top_stocks, use_container_width=True)
 
@@ -230,18 +226,18 @@ if not top_stocks.empty:
     alloc_df = top_stocks.copy()
     alloc_df["Allocation ₹"] = round(per_stock,0)
 
-    st.subheader("Position Sizing (₹ per stock)")
+    st.subheader("Position Sizing")
     st.dataframe(alloc_df, use_container_width=True)
 
 # ===============================
-# REBALANCING ENGINE
+# REBALANCING
 # ===============================
 st.subheader("Rebalancing Signal")
 
 diff = equity_alloc - current_equity
 
 if abs(diff) < 5:
-    st.success("No major change needed")
+    st.success("No major change required")
 elif diff > 0:
     st.info(f"Increase equity by {diff}%")
 else:
