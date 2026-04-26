@@ -4,16 +4,17 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime
 
-# =========================
-# CONFIG
-# =========================
 st.set_page_config(page_title="Client Portfolio Dashboard", layout="wide")
 
 # =========================
-# SAFE DATA FETCH (ANTI-RATE LIMIT)
+# MANUAL REFRESH CONTROL (VERY IMPORTANT)
 # =========================
-@st.cache_data(ttl=600)  # 10 min cache (IMPORTANT)
-def get_data():
+if "last_fetch" not in st.session_state:
+    st.session_state.last_fetch = None
+if "data" not in st.session_state:
+    st.session_state.data = None
+
+def fetch_data():
     try:
         data = yf.download(
             ["^GSPC", "DX-Y.NYB", "^VIX", "^TNX"],
@@ -25,12 +26,13 @@ def get_data():
         )["Close"]
 
         if data.empty:
-            raise ValueError("Empty data")
+            raise Exception("Empty data")
 
+        data.columns = ["SPX", "DXY", "VIX", "US10Y"]
         return data.dropna()
 
-    except Exception:
-        # Fallback synthetic data (NO FAILURE)
+    except:
+        # fallback (NO FAILURE EVER)
         dates = pd.date_range(end=datetime.today(), periods=120)
         return pd.DataFrame({
             "SPX": np.linspace(3500, 4500, 120) + np.random.normal(0, 50, 120),
@@ -39,11 +41,21 @@ def get_data():
             "US10Y": np.linspace(2.5, 4.0, 120) + np.random.normal(0, 0.2, 120),
         }, index=dates)
 
-df = get_data()
-df.columns = ["SPX", "DXY", "VIX", "US10Y"]
+# =========================
+# CONTROLLED FETCH (NO AUTO SPAM)
+# =========================
+if st.session_state.data is None:
+    st.session_state.data = fetch_data()
+    st.session_state.last_fetch = datetime.now()
+
+if st.sidebar.button("🔄 Refresh Market Data"):
+    st.session_state.data = fetch_data()
+    st.session_state.last_fetch = datetime.now()
+
+df = st.session_state.data
 
 # =========================
-# SIGNAL LOGIC
+# SIGNAL ENGINE
 # =========================
 latest = df.iloc[-1]
 prev = df.iloc[-2]
@@ -58,23 +70,23 @@ signals = {
 score = int(sum(signals.values()))
 
 # =========================
-# REGIME ENGINE
+# REGIME LOGIC
 # =========================
 if score >= 2:
     regime = "RISK ON"
-    color = "green"
     alloc = {"Equity": 70, "Cash": 30}
     advice = "Increase equity exposure"
+    color = "green"
 elif score <= -2:
     regime = "RISK OFF"
-    color = "red"
     alloc = {"Equity": 30, "Cash": 70}
     advice = "Reduce equity exposure"
+    color = "red"
 else:
     regime = "TRANSITION"
-    color = "orange"
     alloc = {"Equity": 50, "Cash": 50}
     advice = "Balanced approach"
+    color = "orange"
 
 # =========================
 # SIDEBAR (CLIENT INPUT)
@@ -87,15 +99,17 @@ portfolio_value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000
 
 cash_pct = 100 - equity_pct
 
+st.sidebar.markdown(f"🕒 Last Data Update: {st.session_state.last_fetch.strftime('%H:%M:%S')}")
+
 # =========================
 # HEADER
 # =========================
 st.title(f"{client_name} - Portfolio Dashboard")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Market Regime", regime)
-col2.metric("Model Score", score)
-col3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
+c1, c2, c3 = st.columns(3)
+c1.metric("Market Regime", regime)
+c2.metric("Model Score", score)
+c3.metric("Last Updated", datetime.today().strftime("%d %b %Y"))
 
 # =========================
 # ADVISORY
