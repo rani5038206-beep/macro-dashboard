@@ -2,13 +2,14 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import time
 
 st.set_page_config(layout="wide")
 st.title("📊 Macro Allocation Dashboard")
 
 start = "2018-01-01"
 
-@st.cache_data
+@st.cache_data(ttl=3600)  # cache for 1 hour
 def load_data():
     tickers = {
         "NIFTY": "^NSEI",
@@ -26,15 +27,17 @@ def load_data():
 
     for k, v in tickers.items():
         try:
-            df = yf.download(v, start=start, progress=False)
+            df = yf.download(v, start=start, progress=False, threads=False)
 
             if df is None or df.empty:
                 continue
 
             col = "Adj Close" if "Adj Close" in df.columns else "Close"
-
             series = df[col].rename(k)
+
             data[k] = series
+
+            time.sleep(1)  # 🔥 avoid rate limit
 
         except:
             continue
@@ -49,12 +52,11 @@ def load_data():
 df = load_data()
 
 if df.empty:
-    st.error("⚠️ Data not loading properly. Try refresh after few seconds.")
+    st.warning("⚠️ Data temporarily blocked (Yahoo limit). Refresh after 1 minute.")
     st.stop()
 
 weekly = df.resample("W").last()
 
-# Required columns check
 required = ["DXY", "SPX", "VIX", "US10Y", "NIFTY", "BANK", "IT"]
 missing = [c for c in required if c not in weekly.columns]
 
