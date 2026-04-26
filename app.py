@@ -2,11 +2,23 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
+import os
 
 st.set_page_config(page_title="Client Dashboard", layout="wide")
 
+DATA_FILE = "clients.csv"
+
 # ---------------------------
-# LOAD DATA
+# INIT CLIENT DATABASE
+# ---------------------------
+if not os.path.exists(DATA_FILE):
+    df_init = pd.DataFrame(columns=["Name", "Equity", "Value"])
+    df_init.to_csv(DATA_FILE, index=False)
+
+clients_df = pd.read_csv(DATA_FILE)
+
+# ---------------------------
+# LOAD MARKET DATA
 # ---------------------------
 @st.cache_data(ttl=3600)
 def load_data():
@@ -42,7 +54,7 @@ if df is None:
     st.stop()
 
 # ---------------------------
-# SIGNALS
+# SIGNAL ENGINE
 # ---------------------------
 weekly = df.resample("W").last()
 
@@ -68,65 +80,74 @@ if score >= 2:
     color = "🟢"
     allocation = {"Equity": 80, "Cash": 20}
     message = "Increase equity exposure"
-    reason = "Strong trend + low volatility + weak dollar"
 elif score <= -2:
     regime = "RISK OFF"
     color = "🔴"
     allocation = {"Equity": 40, "Cash": 60}
     message = "Reduce equity exposure"
-    reason = "High volatility + strong dollar + weak trend"
 else:
     regime = "TRANSITION"
     color = "🟡"
     allocation = {"Equity": 60, "Cash": 40}
     message = "Maintain balanced allocation"
-    reason = "Mixed macro signals"
 
 # ---------------------------
-# SIDEBAR (UPGRADED)
+# SIDEBAR - CLIENT MGMT
 # ---------------------------
-st.sidebar.header("👤 Client Profile")
+st.sidebar.header("👤 Client Management")
 
-client_name = st.sidebar.text_input("Client Name", "Client A")
+client_names = clients_df["Name"].tolist()
 
-equity = st.sidebar.slider("Equity %", 0, 100, 60)
-cash = 100 - equity
-
-portfolio_value = st.sidebar.number_input(
-    "Portfolio Value (₹)", value=1000000
+selected_client = st.sidebar.selectbox(
+    "Select Client",
+    ["New Client"] + client_names
 )
+
+if selected_client == "New Client":
+    name = st.sidebar.text_input("Client Name")
+    equity = st.sidebar.slider("Equity %", 0, 100, 60)
+    value = st.sidebar.number_input("Portfolio Value (₹)", value=1000000)
+
+    if st.sidebar.button("Save Client"):
+        new_row = pd.DataFrame([[name, equity, value]],
+                               columns=["Name", "Equity", "Value"])
+        clients_df = pd.concat([clients_df, new_row])
+        clients_df.to_csv(DATA_FILE, index=False)
+        st.sidebar.success("Client Saved")
+else:
+    row = clients_df[clients_df["Name"] == selected_client].iloc[0]
+    name = row["Name"]
+    equity = int(row["Equity"])
+    value = int(row["Value"])
+
+cash = 100 - equity
 
 # ---------------------------
 # HEADER
 # ---------------------------
-st.title(f"📊 {client_name} - Portfolio Dashboard")
-
-st.markdown("### 📌 Market Snapshot")
+st.title(f"📊 {name} - Portfolio Dashboard")
 
 col1, col2, col3 = st.columns(3)
-
-col1.metric("Market Regime", f"{color} {regime}")
-col2.metric("Model Score", f"{score:.1f}")
-col3.metric("Last Updated", df.index[-1].strftime("%d %b %Y"))
+col1.metric("Regime", f"{color} {regime}")
+col2.metric("Score", f"{score:.1f}")
+col3.metric("Updated", df.index[-1].strftime("%d %b %Y"))
 
 # ---------------------------
 # ADVISORY
 # ---------------------------
-st.markdown("### 📢 Advisory Decision")
+st.subheader("📢 Advisory")
 
-if "Reduce" in message:
-    st.error(f"🚨 {message}")
-elif "Increase" in message:
-    st.success(f"🚀 {message}")
+if "Increase" in message:
+    st.success(message)
+elif "Reduce" in message:
+    st.error(message)
 else:
-    st.warning(f"⚖️ {message}")
-
-st.markdown(f"**Why? → {reason}**")
+    st.warning(message)
 
 # ---------------------------
 # COMPARISON
 # ---------------------------
-st.markdown("### ⚖️ Portfolio Comparison")
+st.subheader("⚖️ Portfolio Comparison")
 
 client_alloc = {"Equity": equity, "Cash": cash}
 model_alloc = allocation
@@ -139,24 +160,24 @@ comparison = pd.DataFrame({
 st.bar_chart(comparison.T)
 
 # ---------------------------
-# ACTION ENGINE (STRONG)
+# ACTION
 # ---------------------------
-st.markdown("### 🚨 Final Recommendation")
+st.subheader("🚨 Action")
 
 diff = model_alloc["Equity"] - equity
-change_amount = portfolio_value * abs(diff) / 100
+amount = value * abs(diff) / 100
 
 if diff > 10:
-    st.success(f"🚀 BUY EQUITY: Increase by {diff}% (₹ {int(change_amount):,})")
+    st.success(f"BUY ₹ {int(amount):,}")
 elif diff < -10:
-    st.error(f"🚨 SELL EQUITY: Reduce by {abs(diff)}% (₹ {int(change_amount):,})")
+    st.error(f"SELL ₹ {int(amount):,}")
 else:
-    st.info("✅ HOLD: No major change required")
+    st.info("HOLD")
 
 # ---------------------------
-# MACRO SIGNALS
+# SIGNALS
 # ---------------------------
-st.markdown("### 🧠 Macro Signals")
+st.subheader("🧠 Macro Signals")
 
 signals = pd.DataFrame({
     "Indicator": ["SPX", "DXY", "VIX", "US10Y"],
@@ -173,11 +194,11 @@ st.table(signals)
 # ---------------------------
 # TREND
 # ---------------------------
-st.markdown("### 📈 Market Trend")
+st.subheader("📈 Market Trend")
 
 st.line_chart(df)
 
 # ---------------------------
 # FOOTER
 # ---------------------------
-st.caption("For informational purposes only. Not investment advice.")
+st.caption("For informational purposes only.")
